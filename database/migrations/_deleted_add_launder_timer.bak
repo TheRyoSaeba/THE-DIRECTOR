@@ -1,0 +1,30 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+/**
+ * Adds a dedicated launder cooldown column so that banker-assisted laundering
+ * does not share the general next_action_at timer.  Both the offering banker
+ * and the accepting target each have their 30-min window tracked here,
+ * leaving all other actions (trading, work, etc.) unaffected.
+ */
+return new class extends Migration
+{
+    public $withinTransaction = false;
+
+    public function up(): void
+    {
+        Schema::table('character_timers', function (Blueprint $table) {
+            $table->bigInteger('next_launder_at')->default(0)->after('next_action_at');
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table('character_timers', function (Blueprint $table) {
+            $table->dropColumn('next_launder_at');
+        });
+    }
+};

@@ -1,0 +1,63 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+    - phpstan-baseline.neon
+parameters:
+    # Level 6: catches undefined variables, possible null dereferences, and type
+    # mismatches without demanding exhaustive PHPDoc coverage on everything.
+    # Level 7+ requires return/param types on all callables — premature here.
+    level: 6
+
+    paths:
+        - app
+
+    # ── Parallel analysis ─────────────────────────────────────────────────────
+    # Tune if analysis is slow; 4 processes is a safe default for most dev machines.
+    parallel:
+        maximumNumberOfProcesses: 4
+
+    ignoreErrors:
+
+        # ── 1. Validated request dynamic properties ───────────────────────────
+        # Laravel writes validated data back onto the Request object via __set after
+        # validate() runs. PHPStan sees Request as a fixed class with no such props.
+        - message: '#Access to an undefined property Illuminate\\Http\\Request::\$[a-zA-Z_]+#'
+          reportUnmatched: false
+
+        # ── 2. Nullsafe operator on left side of ?? ───────────────────────────
+        # $x?->foo ?? $default is valid and intentional. PHPStan treats the ?? as
+        # redundant because the nullsafe already short-circuits. Keep the pattern —
+        # it makes the intent explicit when $x itself may be null.
+        - '#Using nullsafe .+ on left side of \?\? is unnecessary#'
+
+        # ── 3. Eloquent Collection template type inference ────────────────────
+        # ->map(), ->filter(), ->first() on Eloquent collections where TValue cannot
+        # be inferred without full @template annotations across every query builder
+        # chain. Not a real bug — future improvement when annotations are added.
+        - '#Unable to resolve the template type#'
+
+        # ── 4. Auth user null dereference in controllers ──────────────────────
+        # Every controller method does: $character = $request->user()->character;
+        # $request->user() is typed as (?User)|null. All these routes sit behind the
+        # `auth` middleware which guarantees a non-null authenticated user at runtime.
+        # PHPStan cannot see through middleware registration to narrow the type.
+        - message: '#Cannot call method character\(\) on .+\|null\.#'
+          reportUnmatched: false
+
+        # ── 5. $character used as non-null after ->user()->character ──────────
+        # After the pattern above, $character is Character|null. Every controller
+        # immediately uses it without re-checking because CheckPlayerState middleware
+        # guarantees a live character on all game routes.
+        - message: '#Call to method \w+ on App\\Models\\Character\|null\.#'
+          reportUnmatched: false
+        - message: '#Cannot access property .+ on App\\Models\\Character\|null\.#'
+          reportUnmatched: false
+        - message: '#Cannot call method \w+\(\) on App\\Models\\Character\|null\.#'
+          reportUnmatched: false
+
+        # ── 6. Larastan non-nullable false positives ──────────────────────────
+        # Larastan infers these as non-nullable from PHPDoc but they can be null
+        # in edge cases (loadMissing, eager-load timing).
+        - message: '#^Using nullsafe method call on non-nullable type App\\Models\\CareerRank\. Use -> instead\.$#'
+          reportUnmatched: false
+        - message: '#^Using nullsafe method call on non-nullable type App\\Models\\CharacterStats\. Use -> instead\.$#'
+          reportUnmatched: false

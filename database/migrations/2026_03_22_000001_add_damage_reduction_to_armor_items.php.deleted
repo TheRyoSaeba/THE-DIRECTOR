@@ -1,0 +1,18 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\DB;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        DB::table('game_items')->where('slug', 'kevlar-armor')->update(['data' => json_encode(['damage_reduction' => 0.15])]);
+        DB::table('game_items')->where('slug', 'uhmwpe-armor')->update(['data' => json_encode(['damage_reduction' => 0.30])]);
+    }
+
+    public function down(): void
+    {
+        DB::table('game_items')->whereIn('slug', ['kevlar-armor', 'uhmwpe-armor'])->update(['data' => null]);
+    }
+};

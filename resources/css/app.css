@@ -1,0 +1,1333 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+@font-face {
+    font-family: 'BankGothic';
+    src: url('../assets/BankGothic Bold.ttf') format('truetype');
+    font-weight: 700;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'BankGothic';
+    src: url('../assets/bank gothic medium bt.ttf') format('truetype');
+    font-weight: 500;
+    font-display: swap;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    :root {
+        --background: 222 47% 11%;
+        --foreground: 0 0% 98%;
+        --card: 240 10% 8%;
+        --card-foreground: 0 0% 98%;
+        --popover: 240 10% 8%;
+        --popover-foreground: 0 0% 98%;
+        --primary: 0 0% 98%;
+        --primary-foreground: 240 10% 4%;
+        --secondary: 240 10% 14%;
+        --secondary-foreground: 0 0% 98%;
+        --muted: 240 10% 14%;
+        --muted-foreground: 240 5% 55%;
+        --accent: 240 10% 14%;
+        --accent-foreground: 0 0% 98%;
+        --destructive: 0 62% 50%;
+        --destructive-foreground: 0 0% 98%;
+        --success: 142 72% 45%;
+        --success-foreground: 0 0% 98%;
+        --warning: 38 92% 50%;
+        --warning-foreground: 0 0% 98%;
+        --border: 240 6% 20%;
+        --input: 240 6% 20%;
+        --ring: 25 95% 53%;
+        --radius: 0.75rem;
+    }
+
+    * {
+        @apply border-border;
+    }
+
+    body {
+        @apply bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 antialiased;
+        color: hsl(var(--foreground));
+        font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+        min-height: 100vh;
+    }
+
+    /* Remove number input spinners */
+    input::-webkit-outer-spin-button,
+    input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+
+    input[type=number] {
+        -moz-appearance: textfield;
+    }
+}
+
+/* Your animations stay the same below... */
+@layer utilities {
+    .text-foreground {
+        color: hsl(var(--foreground));
+    }
+}
+
+/* Hide scrollbar for IE, Edge and Firefox - Exclude textareas */
+*:not(textarea) {
+    -ms-overflow-style: none;
+    /* IE and Edge */
+    scrollbar-width: none;
+    /* Firefox */
+}
+
+/* Explicitly enable scrollbars for textareas */
+textarea {
+    scrollbar-width: thin !important;
+    -ms-overflow-style: auto !important;
+}
+
+textarea::-webkit-scrollbar {
+    display: block !important;
+    width: 6px !important;
+}
+
+textarea::-webkit-scrollbar-track {
+    background: rgba(15, 23, 42, 0.5) !important;
+    border-radius: 10px !important;
+}
+
+textarea::-webkit-scrollbar-thumb {
+    background: #334155 !important;
+    border-radius: 10px !important;
+}
+
+textarea::-webkit-scrollbar-thumb:hover {
+    background: #475569 !important;
+}
+
+
+
+/* Animations from mapcn */
+@keyframes fade-up {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes fade-in {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes pulse-slow {
+
+    0%,
+    100% {
+        opacity: 0.4;
+    }
+
+    50% {
+        opacity: 0.6;
+    }
+}
+
+.animate-pulse-slow {
+    animation: pulse-slow 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes scan {
+    0% {
+        transform: translateX(-100%);
+    }
+
+    100% {
+        transform: translateX(100%);
+    }
+}
+
+.animate-scan {
+    animation: scan 2s ease-in-out infinite;
+}
+
+/* Travels from just off the right edge of the container to fully off the
+ * left. Both endpoints are driven by CSS variables the component sets from
+ * measured pixel values (--ticker-start = container width, --ticker-end =
+ * negative message width), so the distance is in real pixels. The duration
+ * is ALSO set per-message by the component (distance / pixels-per-second),
+ * which keeps the PERCEIVED speed identical at every viewport size. The old
+ * version animated 100vw -> -100% over a fixed 15s, so a wider screen meant
+ * more pixels in the same time = visibly faster. */
+@keyframes city-news-ticker {
+    from {
+        transform: translateX(var(--ticker-start, 100%));
+    }
+
+    to {
+        transform: translateX(var(--ticker-end, -100%));
+    }
+}
+
+.city-news-ticker {
+    animation-name: city-news-ticker;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    animation-duration: var(--ticker-duration, 15s);
+    will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .city-news-ticker {
+        animation: none;
+        transform: none;
+    }
+}
+
+@keyframes scale-in {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* Add after your existing animations section */
+
+/* ── Custom animation keyframes ────────────────────────────────────────────────
+ * Keyframes live here in app.css. The corresponding .animate-* utility classes
+ * are declared inside @layer utilities below so they share the same cascade
+ * layer as Tailwind-generated utilities and always win the specificity fight.
+ * tailwindcss-animate only generates rules for names registered in
+ * theme.animation — our custom names are NOT registered there, so no conflict.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+@keyframes critical-glitch {
+
+    0%,
+    100% {
+        transform: translateX(0) translateY(0);
+    }
+
+    25% {
+        transform: translateX(-1px) translateY(-1px);
+    }
+
+    50% {
+        transform: translateX(1px) translateY(1px);
+    }
+
+    75% {
+        transform: translateX(-1px) translateY(1px);
+    }
+}
+
+@keyframes blood-pulse {
+
+    0%,
+    100% {
+        box-shadow: 0 0 20px rgba(220, 38, 38, 0.3),
+            inset 0 0 30px rgba(185, 28, 28, 0.2),
+            0 0 0 1px rgba(220, 38, 38, 0.1);
+    }
+
+    50% {
+        box-shadow: 0 0 30px rgba(220, 38, 38, 0.5),
+            inset 0 0 40px rgba(185, 28, 28, 0.3),
+            0 0 0 1px rgba(220, 38, 38, 0.2);
+    }
+}
+
+@keyframes blood-drip {
+    0% {
+        top: -10px;
+        opacity: 0;
+        transform: translateY(0);
+    }
+
+    10% {
+        opacity: 1;
+    }
+
+    90% {
+        opacity: 1;
+    }
+
+    100% {
+        top: 100%;
+        opacity: 0;
+        transform: translateY(10px);
+    }
+}
+
+@keyframes warning-pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    50% {
+        opacity: 0.8;
+        transform: scale(1.05);
+    }
+}
+
+@keyframes skull-float {
+
+    0%,
+    100% {
+        transform: translateY(0) rotate(0deg);
+    }
+
+    25% {
+        transform: translateY(-2px) rotate(-5deg);
+    }
+
+    75% {
+        transform: translateY(2px) rotate(5deg);
+    }
+}
+
+@keyframes soft-pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.8;
+    }
+}
+
+@keyframes gbh-hospital-pulse {
+
+    0%,
+    100% {
+        box-shadow: 0 0 15px rgba(168, 85, 247, 0.4), inset 0 0 20px rgba(139, 92, 246, 0.2);
+    }
+
+    50% {
+        box-shadow: 0 0 25px rgba(168, 85, 247, 0.6), inset 0 0 30px rgba(139, 92, 246, 0.3), 0 0 35px rgba(6, 182, 212, 0.3);
+    }
+}
+
+@keyframes gbh-heartbeat {
+
+    0%,
+    100% {
+        transform: scale(1);
+        opacity: 0.7;
+    }
+
+    25% {
+        transform: scale(1.1);
+        opacity: 0.9;
+    }
+
+    50% {
+        transform: scale(1);
+        opacity: 0.7;
+    }
+
+    75% {
+        transform: scale(1.05);
+        opacity: 0.8;
+    }
+}
+
+@keyframes gbh-fail-pulse {
+
+    0%,
+    100% {
+        box-shadow: 0 0 10px rgba(245, 158, 11, 0.3), inset 0 0 15px rgba(217, 119, 6, 0.1);
+    }
+
+    50% {
+        box-shadow: 0 0 20px rgba(245, 158, 11, 0.5), inset 0 0 25px rgba(217, 119, 6, 0.2);
+    }
+}
+
+@keyframes gbh-warning-shake {
+
+    0%,
+    100% {
+        transform: translateX(0);
+    }
+
+    25% {
+        transform: translateX(-1px);
+    }
+
+    75% {
+        transform: translateX(1px);
+    }
+}
+
+@keyframes shield-glow {
+
+    0%,
+    100% {
+        filter: drop-shadow(0 0 2px rgba(251, 191, 36, 0.5));
+    }
+
+    50% {
+        filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.8));
+    }
+}
+
+@keyframes achievement-sparkle {
+
+    0%,
+    100% {
+        box-shadow: 0 0 15px rgba(255, 215, 0, 0.5),
+            0 0 30px rgba(255, 193, 7, 0.3),
+            inset 0 0 20px rgba(255, 215, 0, 0.2);
+    }
+
+    50% {
+        box-shadow: 0 0 30px rgba(255, 215, 0, 0.7),
+            0 0 50px rgba(255, 193, 7, 0.5),
+            0 0 70px rgba(255, 152, 0, 0.3),
+            inset 0 0 30px rgba(255, 215, 0, 0.3);
+    }
+}
+
+/* Plain CSS — no @layer, identical to every other working animation in this file.
+ * animate-critical-glitch defined AFTER animate-blood-pulse so it wins the
+ * single-class-per-element override. For elements needing BOTH simultaneously
+ * use .animate-critical-hit instead (see below). */
+.animate-critical-glitch {
+    animation: critical-glitch 0.5s infinite;
+}
+
+.animate-blood-pulse {
+    animation: blood-pulse 3s ease-in-out infinite;
+}
+
+/* Both on the same element: compound selector has higher specificity than either alone. */
+.animate-blood-pulse.animate-critical-glitch {
+    animation: blood-pulse 3s ease-in-out infinite, critical-glitch 0.5s infinite;
+}
+
+.animate-warning-pulse {
+    animation: warning-pulse 2s ease-in-out infinite;
+}
+
+.animate-skull-float {
+    animation: skull-float 3s ease-in-out infinite;
+}
+
+.animate-soft-pulse {
+    animation: soft-pulse 2s ease-in-out infinite;
+}
+
+.animate-pulse-subtle {
+    animation: soft-pulse 2s ease-in-out infinite;
+}
+
+.animate-gbh-hospital-pulse {
+    animation: gbh-hospital-pulse 3s ease-in-out infinite;
+}
+
+.animate-gbh-heartbeat {
+    animation: gbh-heartbeat 2s ease-in-out infinite;
+}
+
+.animate-gbh-fail-pulse {
+    animation: gbh-fail-pulse 2.5s ease-in-out infinite;
+}
+
+.animate-gbh-warning-shake {
+    animation: gbh-warning-shake 0.5s ease-in-out infinite;
+}
+
+.animate-shield-glow {
+    animation: shield-glow 3s ease-in-out infinite;
+}
+
+.animate-achievement-sparkle {
+    animation: achievement-sparkle 2s ease-in-out infinite;
+}
+
+
+
+/* Blood Drip Effect */
+.blood-drip-container {
+    position: relative;
+    overflow: hidden;
+}
+
+.blood-drip-container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 10%;
+    width: 2px;
+    height: 10px;
+    background: linear-gradient(to bottom,
+            transparent,
+            rgba(220, 38, 38, 0.8),
+            rgba(185, 28, 28, 0.6));
+    animation: blood-drip 4s linear infinite;
+    z-index: 10;
+}
+
+.blood-drip-container::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 20%;
+    width: 1px;
+    height: 8px;
+    background: linear-gradient(to bottom,
+            transparent,
+            rgba(220, 38, 38, 0.6),
+            rgba(185, 28, 28, 0.4));
+    animation: blood-drip 5s linear infinite 1s;
+    z-index: 10;
+}
+
+/* Critical Hit Effects */
+.text-critical {
+    text-shadow:
+        0 0 10px rgba(250, 204, 21, 0.8),
+        0 0 20px rgba(250, 204, 21, 0.5);
+    background: linear-gradient(45deg,
+            rgb(250, 204, 21),
+            rgb(252, 211, 77),
+            rgb(250, 204, 21));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* Permanent Injury Effects */
+.text-permanent-injury {
+    text-shadow:
+        0 0 8px rgba(156, 163, 175, 0.6),
+        0 0 15px rgba(107, 114, 128, 0.4);
+    color: rgb(209, 213, 219);
+}
+
+/* Attack-specific utility classes */
+.bg-attack-damage {
+    background: linear-gradient(135deg,
+            rgba(127, 29, 29, 0.4) 0%,
+            rgba(185, 28, 28, 0.3) 50%,
+            rgba(127, 29, 29, 0.4) 100%);
+    border: 2px solid rgba(220, 38, 38, 0.5);
+}
+
+.bg-attack-miss {
+    background: linear-gradient(135deg,
+            rgba(30, 41, 59, 0.4) 0%,
+            rgba(51, 65, 85, 0.3) 50%,
+            rgba(30, 41, 59, 0.4) 100%);
+    border: 2px solid rgba(71, 85, 105, 0.5);
+}
+
+/* Text Shadow Utilities */
+.text-shadow-sm {
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+/* Text utilities */
+.text-glow-white {
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+}
+
+.text-glow-red {
+    text-shadow: 0 0 10px rgba(239, 68, 68, 0.6);
+}
+
+.text-glow-cyan {
+    text-shadow: 0 0 10px rgba(34, 211, 238, 0.6);
+}
+
+.font-outline {
+    -webkit-text-stroke: 0.5px rgba(0, 0, 0, 0.3);
+}
+
+/* GBH drip pseudo-element effect — kept here because it uses ::before/::after
+ * which cannot be expressed as Tailwind keyframes. The animate-* utility
+ * classes for GBH are owned by tailwind.config.js.
+ */
+@keyframes gbh-medical-drip {
+    0% {
+        top: -15px;
+        opacity: 0;
+        transform: translateY(0);
+    }
+
+    10% {
+        opacity: 1;
+    }
+
+    90% {
+        opacity: 1;
+    }
+
+    100% {
+        top: 100%;
+        opacity: 0;
+        transform: translateY(15px);
+    }
+}
+
+/* GBH Medical Drip Effect */
+.gbh-medical-drip-container {
+    position: relative;
+    overflow: hidden;
+}
+
+.gbh-medical-drip-container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 20%;
+    width: 1px;
+    height: 12px;
+    background: linear-gradient(to bottom,
+            transparent,
+            rgba(139, 92, 246, 0.6),
+            rgba(6, 182, 212, 0.4));
+    animation: gbh-medical-drip 5s linear infinite;
+    z-index: 10;
+}
+
+.gbh-medical-drip-container::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 30%;
+    width: 1px;
+    height: 10px;
+    background: linear-gradient(to bottom,
+            transparent,
+            rgba(6, 182, 212, 0.6),
+            rgba(139, 92, 246, 0.4));
+    animation: gbh-medical-drip 6s linear infinite 1.5s;
+    z-index: 10;
+}
+
+/* GBH Background Styles */
+.bg-gbh-success {
+    background: linear-gradient(135deg,
+            rgba(88, 28, 135, 0.4) 0%,
+            rgba(67, 56, 202, 0.3) 50%,
+            rgba(8, 145, 178, 0.2) 100%);
+    border: 1px solid rgba(168, 85, 247, 0.5);
+}
+
+.bg-gbh-fail {
+    background: linear-gradient(135deg,
+            rgba(245, 158, 11, 0.25) 0%,
+            rgba(251, 191, 36, 0.2) 50%,
+            rgba(245, 158, 11, 0.15) 100%);
+    border: 1px solid rgba(245, 158, 11, 0.6);
+}
+
+/* GBH Glow Effects */
+.gbh-glow-purple {
+    box-shadow:
+        0 0 20px rgba(168, 85, 247, 0.4),
+        inset 0 0 20px rgba(139, 92, 246, 0.2);
+}
+
+.gbh-glow-amber {
+    box-shadow:
+        0 0 20px rgba(245, 158, 11, 0.4),
+        inset 0 0 20px rgba(217, 119, 6, 0.2);
+}
+
+/* EKG Pulse for GBH Success */
+@keyframes ekg-pulse {
+
+    0%,
+    100% {
+        background-position: 0% 50%;
+        opacity: 0.6;
+    }
+
+    50% {
+        background-position: 100% 50%;
+        opacity: 0.8;
+    }
+}
+
+.animate-ekg-pulse {
+    background: linear-gradient(90deg,
+            rgba(136, 19, 55, 0.4) 0%,
+            rgba(190, 18, 60, 0.5) 50%,
+            rgba(136, 19, 55, 0.4) 100%);
+    background-size: 200% 100%;
+    animation: ekg-pulse 4s ease-in-out infinite;
+}
+
+/* Bat Icon Style */
+.bat-icon {
+    filter: drop-shadow(0 0 4px rgba(225, 29, 72, 0.8));
+    stroke-width: 2.5;
+}
+
+/* Heartbeat Animation */
+@keyframes heartbeat {
+    0% {
+        transform: scale(1);
+    }
+
+    25% {
+        transform: scale(1.15);
+    }
+
+    50% {
+        transform: scale(1);
+    }
+
+    75% {
+        transform: scale(1.1);
+    }
+
+    100% {
+        transform: scale(1);
+    }
+}
+
+.animate-heartbeat {
+    animation: heartbeat 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse-subtle {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.8;
+    }
+}
+
+/* Make text more prominent in dark backgrounds */
+.text-prominent {
+    color: rgb(248, 250, 252);
+    /* slate-50 */
+    font-weight: 700;
+    letter-spacing: 0.025em;
+}
+
+.text-shadow-md {
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.text-shadow-lg {
+    text-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+}
+
+/* Glow Effects */
+.glow-red {
+    box-shadow:
+        0 0 20px rgba(220, 38, 38, 0.4),
+        inset 0 0 20px rgba(185, 28, 28, 0.2);
+}
+
+.glow-orange {
+    box-shadow:
+        0 0 20px rgba(251, 146, 60, 0.4),
+        inset 0 0 20px rgba(234, 88, 12, 0.2);
+}
+
+/* Custom scrollbar for attack logs */
+.attack-log-scrollbar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.attack-log-scrollbar::-webkit-scrollbar-track {
+    background: rgba(30, 41, 59, 0.3);
+    border-radius: 3px;
+}
+
+.attack-log-scrollbar::-webkit-scrollbar-thumb {
+    background: linear-gradient(to bottom,
+            rgba(220, 38, 38, 0.8),
+            rgba(185, 28, 28, 0.6));
+    border-radius: 3px;
+}
+
+.attack-log-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(to bottom,
+            rgba(239, 68, 68, 0.9),
+            rgba(220, 38, 38, 0.7));
+}
+
+.animate-fade-up {
+    animation: fade-up 0.5s ease-out both;
+}
+
+.animate-fade-in {
+    animation: fade-in 0.5s ease-out both;
+}
+
+.animate-scale-in {
+    animation: scale-in 0.5s ease-out both;
+}
+
+.delay-100 {
+    animation-delay: 100ms;
+}
+
+.delay-200 {
+    animation-delay: 200ms;
+}
+
+.delay-300 {
+    animation-delay: 300ms;
+}
+
+.delay-400 {
+    animation-delay: 400ms;
+}
+
+.delay-500 {
+    animation-delay: 500ms;
+}
+
+.delay-600 {
+    animation-delay: 600ms;
+}
+
+.blood-pool {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 14px;
+    background: radial-gradient(ellipse at center,
+            rgba(120, 0, 0, 0.6),
+            transparent 70%);
+    filter: blur(6px);
+}
+
+
+.blood-drop {
+    position: absolute;
+    top: 0;
+    width: 2px;
+    height: 18px;
+    background: linear-gradient(to bottom,
+            rgba(220, 38, 38, 0.9),
+            rgba(120, 0, 0, 0.4));
+    border-radius: 999px;
+    animation: blood-fall
+}
+
+/* SWIPE PAGE TRANSITION ANIMATIONS */
+@keyframes swipe-out-left {
+    0% {
+        transform: translateX(0);
+        opacity: 1;
+    }
+
+    100% {
+        transform: translateX(-100%);
+        opacity: 0;
+    }
+}
+
+@keyframes swipe-in-right {
+    0% {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+
+    100% {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes swipe-out-right {
+    0% {
+        transform: translateX(0);
+        opacity: 1;
+    }
+
+    100% {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+}
+
+@keyframes swipe-in-left {
+    0% {
+        transform: translateX(-100%);
+        opacity: 0;
+    }
+
+    100% {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* Animation classes */
+.swipe-out-left {
+    animation: swipe-out-left 0.4s ease-out forwards;
+}
+
+.swipe-in-right {
+    animation: swipe-in-right 0.4s ease-out forwards;
+}
+
+.swipe-out-right {
+    animation: swipe-out-right 0.4s ease-out forwards;
+}
+
+.swipe-in-left {
+    animation: swipe-in-left 0.4s ease-out forwards;
+}
+
+/* Page container for transitions */
+.page-container {
+    position: relative;
+    width: 100%;
+    min-height: 100%;
+}
+
+/* Transition wrapper */
+.transition-wrapper {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* Simple fade for initial load */
+@keyframes gold-shine {
+    0% {
+        background-position: -200% 0;
+    }
+
+    100% {
+        background-position: 200% 0;
+    }
+}
+
+@keyframes gold-border-flow {
+    0% {
+        border-color: rgba(234, 179, 8, 0.4);
+        box-shadow: 0 0 5px rgba(234, 179, 8, 0.2);
+    }
+
+    50% {
+        border-color: rgba(234, 179, 8, 0.8);
+        box-shadow: 0 0 20px rgba(234, 179, 8, 0.4);
+    }
+
+    100% {
+        border-color: rgba(234, 179, 8, 0.4);
+        box-shadow: 0 0 5px rgba(234, 179, 8, 0.2);
+    }
+}
+
+/* Corporate founding pulse – slow, golden glow */
+@keyframes corporate-pulse {
+
+    0%,
+    100% {
+        box-shadow: 0 0 10px rgba(245, 158, 11, 0.3);
+        background-position: 0% 50%;
+    }
+
+    50% {
+        box-shadow: 0 0 20px rgba(245, 158, 11, 0.6);
+        background-position: 100% 50%;
+    }
+}
+
+.animate-corporation-pulse {
+    animation: corporate-pulse 3s ease-in-out infinite;
+    background-size: 200% 200%;
+}
+
+/* Fraud request pulse – purple, faster, flickering */
+@keyframes fraud-pulse {
+
+    0%,
+    100% {
+        box-shadow: 0 0 10px rgba(168, 85, 247, 0.4);
+        opacity: 0.9;
+    }
+
+    50% {
+        box-shadow: 0 0 25px rgba(168, 85, 247, 0.8);
+        opacity: 1;
+    }
+}
+
+.animate-fraud-pulse {
+    animation: fraud-pulse 2s ease-in-out infinite;
+}
+
+/* Success pulse – bright emerald, more intense */
+@keyframes success-pulse {
+
+    0%,
+    100% {
+        box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+        transform: scale(1);
+    }
+
+    50% {
+        box-shadow: 0 0 25px rgba(16, 185, 129, 0.8);
+        transform: scale(1.02);
+    }
+}
+
+.animate-success-pulse {
+    animation: success-pulse 2s ease-in-out infinite;
+}
+
+/* Failure pulse – angry red, shaky */
+@keyframes failure-pulse {
+
+    0%,
+    100% {
+        box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+        transform: translateX(0);
+    }
+
+    25% {
+        transform: translateX(-2px);
+    }
+
+    75% {
+        transform: translateX(2px);
+    }
+
+    50% {
+        box-shadow: 0 0 25px rgba(239, 68, 68, 0.8);
+    }
+}
+
+.animate-failure-pulse {
+    animation: failure-pulse 0.8s ease-in-out infinite;
+}
+
+.bg-gold-acquisition {
+    background: linear-gradient(90deg,
+            rgba(69, 39, 0, 0.6) 0%,
+            rgba(154, 103, 0, 0.4) 25%,
+            rgba(212, 175, 55, 0.5) 50%,
+            rgba(154, 103, 0, 0.4) 75%,
+            rgba(69, 39, 0, 0.6) 100%);
+    background-size: 200% 100%;
+    animation: gold-shine 4s linear infinite, gold-border-flow 3s ease-in-out infinite;
+    border-width: 2px !important;
+}
+
+.fade-enter {
+    opacity: 0;
+}
+
+.fade-enter-active {
+    opacity: 1;
+    transition: opacity 300ms ease-out;
+}
+
+.fade-exit {
+    opacity: 1;
+}
+
+.fade-exit-active {
+    opacity: 0;
+    transition: opacity 300ms ease-out;
+}
+
+.bg-achievement-gold {
+    background: linear-gradient(135deg,
+            rgba(255, 215, 0, 0.45) 0%,
+            rgba(255, 193, 7, 0.35) 30%,
+            rgba(255, 152, 0, 0.25) 70%,
+            rgba(255, 193, 7, 0.35) 100%);
+    position: relative;
+    overflow: hidden;
+    border: 2px solid rgba(255, 215, 0, 0.7);
+}
+
+.bg-achievement-gold::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 200%;
+    height: 100%;
+    background: linear-gradient(90deg,
+            transparent 0%,
+            rgba(255, 255, 255, 0.3) 25%,
+            rgba(255, 255, 255, 0.5) 50%,
+            rgba(255, 255, 255, 0.3) 75%,
+            transparent 100%);
+    animation: achievement-shine 2.5s ease-in-out infinite;
+}
+
+@keyframes achievement-shine {
+
+    0%,
+    100% {
+        left: -100%;
+    }
+
+    50% {
+        left: 100%;
+    }
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: #1e293b;
+    border-radius: 20px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #475569;
+    border-radius: 20px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #64748b;
+}
+
+.shimmer {
+    position: relative;
+    background: linear-gradient(135deg,
+            rgba(255, 215, 0, 0.15) 0%,
+            rgba(255, 215, 0, 0.3) 25%,
+            rgba(255, 215, 0, 0.5) 50%,
+            rgba(255, 215, 0, 0.3) 75%,
+            rgba(255, 215, 0, 0.15) 100%);
+    background-size: 200% 200%;
+    animation: shimmer-move 3s ease-in-out infinite;
+}
+
+@keyframes shimmer-move {
+    0% {
+        background-position: 0% 50%;
+    }
+
+    50% {
+        background-position: 100% 50%;
+    }
+
+    100% {
+        background-position: 0% 50%;
+    }
+}
+
+/* Bright gold glow */
+.shimmer {
+    box-shadow: 0 0 20px rgba(255, 215, 0, 0.4), 0 0 40px rgba(255, 215, 0, 0.2);
+    border: 1px solid rgba(255, 215, 0, 0.6);
+}
+
+.animate-pulse-slow {
+    animation: pulse-slow 3s ease-in-out infinite;
+}
+
+@keyframes sparkle-slow {
+
+    0%,
+    100% {
+        background-position: 0% 50%;
+    }
+
+    50% {
+        background-position: 100% 50%;
+    }
+}
+
+.animate-sparkle-slow {
+    animation: sparkle-slow 4s ease-in-out infinite;
+    background-size: 200% 200%;
+}
+
+/* ── Player name rank animations ──────────────────────────────────────────── */
+
+@keyframes td-board-shift {
+    0% {
+        background-position: 0% 50%;
+    }
+
+    50% {
+        background-position: 100% 50%;
+    }
+
+    100% {
+        background-position: 0% 50%;
+    }
+}
+
+@keyframes td-president-pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.78;
+    }
+}
+
+/* Director of the Board — Bank Gothic Bold, platinum sweep.
+ * The font change alone signals max rank. Sweep is cold slate-to-white
+ * — corporate platinum, not decorative gold or colour. */
+.td-name-board {
+    font-family: 'BankGothic', sans-serif;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    background: linear-gradient(90deg,
+            #94a3b8 0%,
+            #e2e8f0 25%,
+            #f8fafc 45%,
+            #e2e8f0 65%,
+            #94a3b8 85%,
+            #f1f5f9 100%);
+    background-size: 280% auto;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: td-board-shift 6s ease-in-out infinite;
+}
+
+/* Group President — Bank Gothic Medium, amber pulse.
+ * Same typeface family as DOTB — they're in the same tier of existence.
+ * Medium weight and warmer colour separates them clearly. */
+.td-name-president {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    color: #fbbf24;
+    animation: td-president-pulse 4s ease-in-out infinite;
+}
+
+/* Managing Director — Inter Bold, cyan-white.
+ * Stays in the project's native font — they run a company but haven't
+ * crossed into the holding-company tier where the typeface changes.
+ * The colour lift over regular players is enough to signal authority. */
+.td-name-md {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-weight: 700;
+    color: #a5f3fc;
+    letter-spacing: 0.03em;
+}
+
+/* ── Mayor tax-policy slider ────────────────────────────────────────
+ * Native <input type="range"> restyled to fit the chambers aesthetic.
+ * The component sets --pct (fill percentage) and --accent (thumb color)
+ * inline as CSS variables; we just paint the track gradient and thumb.
+ * Track height is intentionally tall enough to be a real touch target on
+ * mobile without dominating the card. */
+.tax-slider {
+    height: 28px;
+    padding: 0;
+    margin: 0;
+    --thumb-size: 18px;
+}
+
+.tax-slider::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: 999px;
+    background: linear-gradient(to right,
+            var(--accent, #34d399) 0%,
+            var(--accent, #34d399) var(--pct, 0%),
+            rgba(255, 255, 255, 0.06) var(--pct, 0%),
+            rgba(255, 255, 255, 0.06) 100%);
+}
+
+.tax-slider::-moz-range-track {
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.tax-slider::-moz-range-progress {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--accent, #34d399);
+}
+
+.tax-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: var(--thumb-size);
+    height: var(--thumb-size);
+    border-radius: 999px;
+    background: var(--accent, #34d399);
+    border: 2px solid rgba(15, 23, 42, 0.95);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.04), 0 4px 12px rgba(0, 0, 0, 0.4);
+    cursor: grab;
+    margin-top: -6px;
+    /* center on 6px track */
+    transition: transform 120ms ease-out, box-shadow 120ms ease-out;
+}
+
+.tax-slider::-moz-range-thumb {
+    width: var(--thumb-size);
+    height: var(--thumb-size);
+    border-radius: 999px;
+    background: var(--accent, #34d399);
+    border: 2px solid rgba(15, 23, 42, 0.95);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.04), 0 4px 12px rgba(0, 0, 0, 0.4);
+    cursor: grab;
+    transition: transform 120ms ease-out, box-shadow 120ms ease-out;
+}
+
+.tax-slider:hover:not(:disabled)::-webkit-slider-thumb,
+.tax-slider:focus:not(:disabled)::-webkit-slider-thumb {
+    transform: scale(1.15);
+    box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.06), 0 6px 16px rgba(0, 0, 0, 0.5);
+}
+
+.tax-slider:hover:not(:disabled)::-moz-range-thumb,
+.tax-slider:focus:not(:disabled)::-moz-range-thumb {
+    transform: scale(1.15);
+    box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.06), 0 6px 16px rgba(0, 0, 0, 0.5);
+}
+
+.tax-slider:active:not(:disabled)::-webkit-slider-thumb,
+.tax-slider:active:not(:disabled)::-moz-range-thumb {
+    cursor: grabbing;
+}
+
+.tax-slider:focus {
+    outline: none;
+}
+
+.tax-slider:disabled {
+    cursor: not-allowed;
+}

@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  RCIED detonation outcomes flowchart for the Bombing Guide wiki page.
+
+  Lives at /rcied-detonation.svg (NOT /wiki/...) so php artisan serve
+  doesn't shadow the /wiki Laravel route.
+
+  Width/height intentionally omitted — viewBox carries intrinsic size.
+  Wrapping <figure> in show.blade.php uses clamp(420px, 60vw, 960px).
+
+  Truth source: app/Http/Controllers/SettingsController.php::detonate
+  + app/Actions/PlantBomb.php. Re-read both before changing the tree.
+
+  ── Editorial choices ───────────────────────────────────────────────
+  Numbers stripped: earlier revision listed 25%/45% HP loss and
+  4%/6% max HP loss as text in each leaf box. Removed because:
+    (a) the diagram should show STRUCTURE not formulas — anyone who
+        cares about percentages can read the prose or the source.
+    (b) percentages crowded the leaves and made the tree hard to scan.
+  "Double protection window" relabelled "Higher protection window"
+  to match the wiki copy and stop implying an exact 2× factor in the
+  flowchart that should stay shape-only.
+
+  ── Verified flow ───────────────────────────────────────────────────
+    A. Away / Jailed / Hospitalized → No HP damage, all items lost,
+       no protection.
+    B. In home city, not safe → HP damage applied, half items lost.
+       Splits by online state:
+         B1. Online  → lower HP damage, no protection window.
+         B2. Offline → higher HP damage, higher protection window.
+       Either B branch may collapse into an Explosive Kill if rolled
+       damage brings HP to ≤20 AND a 33% roll passes.
+
+  Palette pinned to wiki theme (matches damage-outcomes.svg).
+  Geometry: viewBox 1080×620. All node right edges ≤ 1070.
+-->
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 1080 620"
+  role="img"
+  aria-labelledby="title desc"
+  font-family="'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif"
+>
+  <title id="title">RCIED detonation outcome tree</title>
+  <desc id="desc">When the bomb detonates, the outcome depends on where the target is at that moment. If the target is away from their home city, or jailed, or hospitalized, all stored items are destroyed but no HP damage or protection window applies. If the target is in their home city and not safe, the bomb deals HP damage and destroys half their stored items. An online target receives no protection window; an offline target receives a higher protection window. On either damage branch, if rolled damage would drop the target's HP to 20 or below, a kill check may collapse the outcome into an Explosive Kill.</desc>
+
+  <defs>
+    <filter id="nodeShadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#18181b" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#a8a29e"/>
+    </marker>
+    <marker id="arrowDanger" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#be123c"/>
+    </marker>
+  </defs>
+
+  <!-- ─── BACKGROUND ─────────────────────────────────────────────────── -->
+  <rect width="1080" height="620" fill="#fafaf7"/>
+  <g opacity="0.04">
+    <path d="M0 60H1080M0 120H1080M0 180H1080M0 240H1080M0 300H1080M0 360H1080M0 420H1080M0 480H1080M0 540H1080" stroke="#18181b" stroke-width="1"/>
+  </g>
+
+  <!--
+    Column anchors (centre-x of each node):
+      Detonation                   : 540   root
+      Away/Safe outcome            : 220   branch A leaf
+      In home city, not safe       : 740   branch B parent
+      Online sub-leaf              : 600   branch B1
+      Offline sub-leaf             : 880   branch B2
+      Explosive Kill (terminal)    : 740   sits above B leaves, shared
+  -->
+
+  <!-- ─── CONNECTORS ─────────────────────────────────────────────────── -->
+  <g fill="none" stroke="#a8a29e" stroke-width="1.5">
+    <!-- Root → 2 main branches -->
+    <path d="M480 78 Q220 78 220 128" marker-end="url(#arrow)"/>
+    <path d="M600 78 Q740 78 740 128" marker-end="url(#arrow)"/>
+
+    <!-- Branch B → Online + Offline sub-leaves -->
+    <path d="M680 250 Q600 250 600 340" marker-end="url(#arrow)"/>
+    <path d="M800 250 Q880 250 880 340" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- HP-overflow → Kill (dashed red): both sub-leaves may collapse to a
+       shared Explosive Kill node. Curves up from each into the kill node. -->
+  <g fill="none" stroke="#be123c" stroke-width="1.5" stroke-dasharray="6 4">
+    <path d="M600 340 Q600 480 740 480" marker-end="url(#arrowDanger)"/>
+    <path d="M880 340 Q880 480 800 480" marker-end="url(#arrowDanger)"/>
+  </g>
+
+  <!-- ─── NODES ──────────────────────────────────────────────────────── -->
+
+  <!-- Root: Detonation -->
+  <g filter="url(#nodeShadow)">
+    <rect x="460" y="38" width="160" height="40" rx="6" fill="#0e7490" stroke="#155e75" stroke-width="1"/>
+    <text x="540" y="63" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff" letter-spacing="0.04em">DETONATION</text>
+  </g>
+
+  <!-- Branch A: Away / Jailed / Hospitalized -->
+  <g filter="url(#nodeShadow)">
+    <rect x="80" y="128" width="280" height="100" rx="6" fill="#ffffff" stroke="#d6d3c7" stroke-width="1.5"/>
+    <text x="220" y="152" text-anchor="middle" font-size="12" font-weight="800" fill="#a16207" letter-spacing="0.06em">AWAY · JAILED · HOSPITALIZED</text>
+    <line x1="100" y1="164" x2="340" y2="164" stroke="#e7e5dd" stroke-width="1"/>
+    <text x="220" y="186" text-anchor="middle" font-size="13" font-weight="600" fill="#18181b">No HP damage</text>
+    <text x="220" y="204" text-anchor="middle" font-size="13" font-weight="600" fill="#18181b">All items destroyed</text>
+    <text x="220" y="222" text-anchor="middle" font-size="13" font-weight="600" fill="#18181b">No protection</text>
+  </g>
+
+  <!-- Branch B parent: In home city, not safe -->
+  <g filter="url(#nodeShadow)">
+    <rect x="600" y="128" width="280" height="120" rx="6" fill="#ffffff" stroke="#0e7490" stroke-width="1.5"/>
+    <text x="740" y="152" text-anchor="middle" font-size="12" font-weight="800" fill="#0e7490" letter-spacing="0.06em">IN HOME CITY · NOT SAFE</text>
+    <line x1="620" y1="164" x2="860" y2="164" stroke="#e7e5dd" stroke-width="1"/>
+    <text x="740" y="186" text-anchor="middle" font-size="13" font-weight="600" fill="#18181b">HP damage applied</text>
+    <text x="740" y="204" text-anchor="middle" font-size="13" font-weight="600" fill="#18181b">Half items destroyed</text>
+    <text x="740" y="234" text-anchor="middle" font-size="11" fill="#71717a" font-style="italic">splits by online state ↓</text>
+  </g>
+
+  <!-- Sub-branch B1: Online -->
+  <g filter="url(#nodeShadow)">
+    <rect x="460" y="340" width="280" height="100" rx="6" fill="#ffffff" stroke="#d6d3c7" stroke-width="1.5"/>
+    <text x="600" y="364" text-anchor="middle" font-size="12" font-weight="800" fill="#0e7490" letter-spacing="0.08em">ONLINE</text>
+    <line x1="480" y1="376" x2="720" y2="376" stroke="#e7e5dd" stroke-width="1"/>
+    <text x="600" y="398" text-anchor="middle" font-size="13" font-weight="600" fill="#18181b">Lower HP damage</text>
+    <text x="600" y="420" text-anchor="middle" font-size="13" font-weight="600" fill="#18181b">No protection</text>
+  </g>
+
+  <!-- Sub-branch B2: Offline -->
+  <g filter="url(#nodeShadow)">
+    <rect x="740" y="340" width="280" height="100" rx="6" fill="#ecfdf5" stroke="#047857" stroke-width="1.5"/>
+    <text x="880" y="364" text-anchor="middle" font-size="12" font-weight="800" fill="#047857" letter-spacing="0.08em">OFFLINE</text>
+    <line x1="760" y1="376" x2="1000" y2="376" stroke="#e7e5dd" stroke-width="1"/>
+    <text x="880" y="398" text-anchor="middle" font-size="13" font-weight="600" fill="#18181b">Higher HP damage</text>
+    <text x="880" y="420" text-anchor="middle" font-size="13" font-weight="600" fill="#047857">Higher protection window</text>
+  </g>
+
+  <!-- Explosive Kill (shared terminal node for B-branch overflow) -->
+  <g filter="url(#nodeShadow)">
+    <rect x="630" y="460" width="220" height="40" rx="6" fill="#be123c" stroke="#9f1239" stroke-width="1"/>
+    <text x="740" y="485" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff" letter-spacing="0.02em">EXPLOSIVE KILL</text>
+  </g>
+
+  <!-- ─── LEGEND ─────────────────────────────────────────────────────── -->
+  <g transform="translate(40, 560)">
+    <g transform="translate(0, 0)">
+      <rect width="14" height="14" rx="3" fill="#0e7490"/>
+      <text x="22" y="11" font-size="11" fill="#27272a">Branching</text>
+    </g>
+    <g transform="translate(110, 0)">
+      <rect width="14" height="14" rx="3" fill="#be123c"/>
+      <text x="22" y="11" font-size="11" fill="#27272a">Kill outcome</text>
+    </g>
+    <g transform="translate(230, 0)">
+      <rect width="14" height="14" rx="3" fill="#ecfdf5" stroke="#047857" stroke-width="1.5"/>
+      <text x="22" y="11" font-size="11" fill="#27272a">Protection-granted outcome</text>
+    </g>
+    <g transform="translate(440, 0)">
+      <rect width="14" height="14" rx="3" fill="#ffffff" stroke="#d6d3c7" stroke-width="1.5"/>
+      <text x="22" y="11" font-size="11" fill="#27272a">Other outcome</text>
+    </g>
+    <g transform="translate(610, 0)">
+      <line x1="0" y1="7" x2="20" y2="7" stroke="#be123c" stroke-width="1.5" stroke-dasharray="6 4"/>
+      <text x="28" y="11" font-size="11" fill="#27272a">HP-overflow → kill</text>
+    </g>
+  </g>
+</svg>

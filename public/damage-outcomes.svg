@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Damage outcomes flowchart for the Combat Guide wiki page.
+
+  Lives at /damage-outcomes.svg (NOT /wiki/...) so php artisan serve doesn't
+  shadow the /wiki Laravel route. Production deploy ships this with the rest
+  of public/ unchanged.
+
+  Width/height intentionally omitted — the SVG carries its viewBox-derived
+  intrinsic size (1080×620). The wrapping <figure> in show.blade.php uses
+  clamp(420px, 60vw, 960px) to scale responsively.
+
+  Truth source: app/Http/Controllers/ConflictController.php::attack() +
+  app/Services/ConflictService.php. Re-read those before changing the tree.
+
+  Geometry: every node fits inside x=[40,1070]. The top spine (Attack →
+  Possible Outcomes) is centred at x=540; the right-hand kill branch is
+  shifted left of dead-right so Damage + its modifiers stay inside the
+  viewBox (Max HP Loss right edge = 1070, with 10px margin to the 1080
+  viewBox edge). Earlier versions clipped Max HP Loss past x=1110.
+
+  ── Vocabulary ──────────────────────────────────────────────────────
+  Diagram speaks in the same possible-worlds / counterfactuals language
+  the wiki prose uses. "Possible Outcomes" replaces "Hit Roll" / "Kill
+  Roll" because the dice mechanics aren't disclosed to players — what
+  they see is the tree of possible worlds the attack could land in, and
+  which counterfactual conditions toggle a branch.
+
+  The HP-overflow case is drawn as a labelled red curl from the Damage
+  parent back to the Instant Kill node — explicitly: "if damage ≥ HP,
+  this world collapses into Instant Kill". The player perceives the
+  overflow outcome as a kill, indistinguishable from the instant-kill
+  branch except for the damage number in the report. The diagram says
+  this with an arrow rather than burying it in a footnote.
+
+  ── Flow (verified against the controller) ──────────────────────────
+    1. hit_chance & hit_roll → MISS or HIT.
+    2. On HIT, kill_chance & kill_roll → INSTANT KILL or DAMAGE.
+    3. DAMAGE always reduces HP. Two INDEPENDENT secondary possibilities
+       layer on top: Critical Hit (extra damage) and Max HP Loss
+       (permanent). Either, both, or neither may fire — they are not
+       mutually exclusive.
+    4. If the damage rolled would drop the target to 0 HP, the damage
+       branch delegates back to handleKill: the player still dies, but
+       actualDamage is reported in the result. From the target's POV
+       this is indistinguishable from an instant kill.
+-->
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 1080 620"
+  role="img"
+  aria-labelledby="title desc"
+  font-family="'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif"
+>
+  <title id="title">Assassination outcome tree — possible worlds and counterfactuals</title>
+  <desc id="desc">Every assassination opens onto a series of possible worlds. The first branching splits into the world where you miss and the world where you hit. On a hit, a second branching splits into the world where the target is killed instantly and the world where you deal damage. The damage world stacks two independent counterfactuals — critical hit and max HP loss — either, both, or neither of which may obtain. Counterfactually, if the damage dealt would exceed the target's remaining HP, the damage world collapses back into the kill world: the target dies, indistinguishably from an instant kill from their point of view.</desc>
+
+  <defs>
+    <filter id="nodeShadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#18181b" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#a8a29e"/>
+    </marker>
+    <marker id="arrowDanger" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#be123c"/>
+    </marker>
+  </defs>
+
+  <!-- ─── BACKGROUND ─────────────────────────────────────────────────── -->
+  <rect width="1080" height="620" fill="#fafaf7"/>
+  <g opacity="0.04">
+    <path d="M0 60H1080M0 120H1080M0 180H1080M0 240H1080M0 300H1080M0 360H1080M0 420H1080M0 480H1080M0 540H1080" stroke="#18181b" stroke-width="1"/>
+  </g>
+
+  <!--
+    Column anchors (centre-x of each node):
+      Attack / Possibilities-1 : 540
+      Miss world               : 220
+      Hit world / Possibles-2  : 740
+      Instant Kill world       : 540
+      Damage world             : 880
+      Critical Hit modifier    : 780
+      Max HP Loss modifier     : 980
+    Right-most node edge: 980 + 90 = 1070. ✓ inside the 1080 viewBox.
+  -->
+
+  <!-- ─── CONNECTORS ─────────────────────────────────────────────────── -->
+  <g fill="none" stroke="#a8a29e" stroke-width="1.5">
+    <!-- Attack → Possible Outcomes (first) -->
+    <path d="M540 78 V108" marker-end="url(#arrow)"/>
+
+    <!-- First split → Miss (left) and Hit (right) -->
+    <path d="M460 148 Q220 148 220 198" marker-end="url(#arrow)"/>
+    <path d="M620 148 Q740 148 740 198" marker-end="url(#arrow)"/>
+
+    <!-- Hit → Possible Outcomes (second) -->
+    <path d="M740 238 V286" marker-end="url(#arrow)"/>
+
+    <!-- Second split → Instant Kill (left) and Damage (right) -->
+    <path d="M660 326 Q540 326 540 376" marker-end="url(#arrow)"/>
+    <path d="M820 326 Q880 326 880 376" marker-end="url(#arrow)"/>
+
+    <!-- Damage → two independent modifier possibilities (Crit + Max HP).
+         Dashed = independent counterfactual; may or may not obtain. -->
+    <path d="M880 416 V488 H780 V518" marker-end="url(#arrow)" stroke-dasharray="4 4"/>
+    <path d="M880 416 V488 H980 V518" marker-end="url(#arrow)" stroke-dasharray="4 4"/>
+  </g>
+
+  <!-- HP-overflow counterfactual: if damage ≥ HP, the Damage world
+       collapses into the Instant Kill world. Drawn as a labelled red
+       curl arcing below the Damage row back into Instant Kill's right
+       edge. The dashed-red + label makes the counterfactual explicit —
+       not buried in legend or footnote. -->
+  <g fill="none" stroke="#be123c" stroke-width="1.5" stroke-dasharray="6 4">
+    <path d="M770 396 Q700 460 650 396" marker-end="url(#arrowDanger)"/>
+  </g>
+  <!-- Counterfactual label sitting under the arc. Background-fill rect
+       gives it a subtle plaque so it reads cleanly over the arrow. -->
+  <g>
+    <rect x="640" y="438" width="200" height="22" rx="4" fill="#fef2f2" stroke="#fecaca" stroke-width="1"/>
+    <text x="740" y="453" text-anchor="middle" font-size="11" font-weight="600" fill="#9f1239">
+      if damage ≥ remaining HP
+    </text>
+  </g>
+
+  <!-- ─── NODES ──────────────────────────────────────────────────────── -->
+
+  <!-- Root: Attack — cx=540 -->
+  <g filter="url(#nodeShadow)">
+    <rect x="460" y="38" width="160" height="40" rx="6" fill="#0e7490" stroke="#155e75" stroke-width="1"/>
+    <text x="540" y="63" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff" letter-spacing="0.04em">ATTACK</text>
+  </g>
+
+  <!-- First branching: Possible Outcomes — cx=540 -->
+  <g filter="url(#nodeShadow)">
+    <rect x="420" y="108" width="240" height="40" rx="6" fill="#ffffff" stroke="#0e7490" stroke-width="1.5"/>
+    <text x="540" y="133" text-anchor="middle" font-size="13" font-weight="700" fill="#0e7490">Possible Outcomes</text>
+  </g>
+
+  <!-- Miss world — cx=220 -->
+  <g filter="url(#nodeShadow)">
+    <rect x="120" y="198" width="200" height="40" rx="6" fill="#ffffff" stroke="#d6d3c7" stroke-width="1.5"/>
+    <text x="220" y="223" text-anchor="middle" font-size="13" font-weight="700" fill="#18181b">Miss</text>
+  </g>
+
+  <!-- Hit world — cx=740 -->
+  <g filter="url(#nodeShadow)">
+    <rect x="640" y="198" width="200" height="40" rx="6" fill="#ffffff" stroke="#0e7490" stroke-width="1.5"/>
+    <text x="740" y="223" text-anchor="middle" font-size="13" font-weight="700" fill="#0e7490">Hit</text>
+  </g>
+
+  <!-- Second branching: Possible Outcomes — cx=740 -->
+  <g filter="url(#nodeShadow)">
+    <rect x="620" y="286" width="240" height="40" rx="6" fill="#ffffff" stroke="#0e7490" stroke-width="1.5"/>
+    <text x="740" y="311" text-anchor="middle" font-size="13" font-weight="700" fill="#0e7490">Possible Outcomes</text>
+  </g>
+
+  <!-- Instant Kill world — cx=540 -->
+  <g filter="url(#nodeShadow)">
+    <rect x="430" y="376" width="220" height="40" rx="6" fill="#be123c" stroke="#9f1239" stroke-width="1"/>
+    <text x="540" y="401" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff" letter-spacing="0.02em">INSTANT KILL</text>
+  </g>
+
+  <!-- Damage world — cx=880 -->
+  <g filter="url(#nodeShadow)">
+    <rect x="770" y="376" width="220" height="40" rx="6" fill="#0e7490" stroke="#155e75" stroke-width="1"/>
+    <text x="880" y="401" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">DAMAGE</text>
+  </g>
+
+  <!-- ── Independent counterfactual modifiers ────────────────────────── -->
+
+  <!-- Critical Hit — cx=780 -->
+  <g filter="url(#nodeShadow)">
+    <rect x="690" y="518" width="180" height="40" rx="6" fill="#ffffff" stroke="#d6d3c7" stroke-width="1.5"/>
+    <text x="780" y="543" text-anchor="middle" font-size="13" font-weight="700" fill="#18181b">Critical Hit</text>
+  </g>
+
+  <!-- Max HP Loss — cx=980 -->
+  <g filter="url(#nodeShadow)">
+    <rect x="890" y="518" width="180" height="40" rx="6" fill="#fffbeb" stroke="#a16207" stroke-width="1.5"/>
+    <text x="980" y="543" text-anchor="middle" font-size="13" font-weight="700" fill="#18181b">Max HP Loss</text>
+  </g>
+
+  <!-- ─── LEGEND ─────────────────────────────────────────────────────────
+       Five swatch+label pairs. The rightmost label ends near x=770, well
+       inside the 1080 viewBox. Vocabulary: branching = node where the
+       world splits; outcome = terminal world; counterfactual modifier =
+       independent possibility layered onto an outcome. -->
+  <g transform="translate(40, 580)">
+    <g transform="translate(0, 0)">
+      <rect width="14" height="14" rx="3" fill="#0e7490"/>
+      <text x="22" y="11" font-size="11" fill="#27272a">Branching</text>
+    </g>
+    <g transform="translate(110, 0)">
+      <rect width="14" height="14" rx="3" fill="#be123c"/>
+      <text x="22" y="11" font-size="11" fill="#27272a">Kill outcome</text>
+    </g>
+    <g transform="translate(230, 0)">
+      <rect width="14" height="14" rx="3" fill="#ffffff" stroke="#d6d3c7" stroke-width="1.5"/>
+      <text x="22" y="11" font-size="11" fill="#27272a">Counterfactual modifier</text>
+    </g>
+    <g transform="translate(430, 0)">
+      <rect width="14" height="14" rx="3" fill="#fffbeb" stroke="#a16207" stroke-width="1.5"/>
+      <text x="22" y="11" font-size="11" fill="#27272a">Permanent</text>
+    </g>
+    <g transform="translate(550, 0)">
+      <line x1="0" y1="7" x2="20" y2="7" stroke="#be123c" stroke-width="1.5" stroke-dasharray="6 4"/>
+      <text x="28" y="11" font-size="11" fill="#27272a">Counterfactual kill</text>
+    </g>
+  </g>
+</svg>
