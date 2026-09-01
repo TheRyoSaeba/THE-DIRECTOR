@@ -1,6 +1,6 @@
 The Director is a fully feature complete PHP game i spent about 3 months of my life working on.
 
-It's got in depth careers ( lawyer, judge, banker), crimes, complex business and policing systems, arrests, elections etc, and a corporate ladder. 
+It's got in depth careers and jobs  ( lawyer, judge, banker), crimes, complex business and policing systems, arrests, elections, character histories, a corporate ladder and much more
 
 Stack is Laravel, React, inertia, redis and postgresql. 
  
