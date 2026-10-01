@@ -839,7 +839,7 @@ class BankController extends CityController
                 $offer->update(['amount_sent' => 0, 'status' => \App\Models\LaunderOffer::STATUS_PENDING]);
 
                 DB::table('character_timers')->where('character_id', $banker->id)
-                    ->update(['next_action_at' => now()->addMinutes(15)->getTimestamp(), 'strength' => 0]);
+                    ->update(['next_action_at' => now()->addMinutes(15)->getTimestamp(), 'strength' => 0, 'strength_updated_at' => now()->getTimestamp()]);
 
                 if (!$success) {
                     \App\Models\CharacterHistory::addHistory($banker, 'launders_failed');

@@ -69,7 +69,7 @@ class WorkController extends Controller
             }
         }
 
-        if ($character->timers->next_work_at->isFuture()) {
+        if ($character->timers?->next_work_at?->isFuture()) {
             return back()->with('error', 'You need to wait before working again');
         }
 

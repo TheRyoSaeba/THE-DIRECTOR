@@ -688,6 +688,7 @@ class CorporationStressTest extends Command
                 'hospital_until' => 0,
                 'jail_until' => 0,
                 'strength' => 100,
+                'strength_updated_at' => now()->getTimestamp(),
             ]);
             DB::table('sessions')->updateOrInsert(
                 ['id' => 'stress-' . $char->id],

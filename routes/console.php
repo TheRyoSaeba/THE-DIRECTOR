@@ -7,17 +7,7 @@ use Illuminate\Support\Facades\Schedule;
 
 
 
-Schedule::call(function () {
-    DB::statement("
-        UPDATE character_timers AS t
-        SET strength = LEAST(100.00, t.strength + 8.333)
-        FROM characters AS c
-        WHERE t.character_id = c.id
-          AND c.deleted_at IS NULL
-          AND c.health > 0
-          AND t.strength < 100.00
-    ");
-})->everyFiveMinutes()->name('strength-recovery')->withoutOverlapping();
+// strength-recovery removed: strength regenerates on read (CharacterTimers::effectiveStrength).
 
 
 Schedule::call(function () {

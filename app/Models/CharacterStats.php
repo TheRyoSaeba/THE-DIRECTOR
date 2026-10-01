@@ -20,7 +20,7 @@ class CharacterStats extends Model
     ];
 
     protected $casts = [
-        'influence' => 'float',
+        'influence' => 'float', // numeric(10,3) in Postgres; PDO returns a string, cast to float
         'intelligence' => 'integer',
         'offense' => 'integer',
         'defense' => 'integer',
@@ -247,12 +247,14 @@ class CharacterStats extends Model
         return $bonuses;
     }
 
+    /**
+     * influence is numeric(10,3) (migration 2026_10_01_000002); round to the
+     * column scale so the in-memory value matches what Postgres stores and
+     * float noise (0.1 + 0.2) never reaches the binding.
+     */
     public function addInfluence(float $amount, bool $save = true): void
     {
-        $this->influence += $amount;
-        if ($this->influence > 150) {
-            $this->influence = 150;
-        }
+        $this->influence = round(min(150, (float) $this->influence + $amount), 3);
         if ($save)
             $this->save();
     }
@@ -287,7 +289,7 @@ class CharacterStats extends Model
 
     public function removeInfluence(float $amount, bool $save = true): void
     {
-        $this->influence = max(0, $this->influence - $amount);
+        $this->influence = round(max(0, (float) $this->influence - $amount), 3);
         if ($save)
             $this->save();
     }

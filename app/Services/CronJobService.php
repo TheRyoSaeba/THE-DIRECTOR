@@ -245,7 +245,6 @@ class CronJobService
     public function updateJob(string $name, ?string $schedule = null, ?string $command = null): bool
     {
         $allowedJobs = [
-            'strength-recovery',
             'health-regen',
             'auto-logout',
             'restock-items',
@@ -302,19 +301,8 @@ class CronJobService
         }
 
         $jobs = [
-            [
-                'name' => 'strength-recovery',
-                'schedule' => '*/5 * * * *',
-                'command' => "
-                    UPDATE character_timers AS t
-                    SET strength = LEAST(100.00, t.strength + 8.333)
-                    FROM characters AS c
-                    WHERE t.character_id = c.id 
-                        AND c.deleted_at IS NULL 
-                        AND c.health > 0 
-                        AND t.strength < 100.00;
-                "
-            ],
+            // strength-recovery removed: strength now regenerates on read
+            // (CharacterTimers::effectiveStrength), so no job rewrites every row.
 
 
             [
