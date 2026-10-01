@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, memo, forwardRef, useImperativeHandle } from "react";
 import { usePage, router, Link } from "@inertiajs/react";
 import { route } from "ziggy-js";
 import { motion, AnimatePresence } from "framer-motion";
@@ -81,6 +81,111 @@ const getOnlineTooltipPosition = (rect) => {
     };
 };
 
+// Hover-prefetch cache window. Game state changes often, so keep it short;
+// any non-GET visit also flushes the whole prefetch cache (see below).
+const PREFETCH_CACHE_FOR = "5s";
+
+// GET /journal and GET /messages mark entries as read, so prefetching them
+// would mark things read that the player never saw.
+const NO_PREFETCH_PATHS = ["/journal", "/messages"];
+
+const prefetchPropsFor = (href) => {
+    const path = typeof href === "string" ? href.split("?")[0] : "";
+    if (
+        !path ||
+        NO_PREFETCH_PATHS.some((p) => path === p || path.startsWith(`${p}/`))
+    ) {
+        return {};
+    }
+    return { prefetch: "hover", cacheFor: PREFETCH_CACHE_FOR };
+};
+
+// Owns the hover state so hovering a name only re-renders the tooltip,
+// not the whole layout. Rendered at the same spot in the tree as before
+// (outside the backdrop-blur footer, which would otherwise become the
+// containing block for this position:fixed element).
+const OnlinePlayerTooltip = forwardRef(function OnlinePlayerTooltip(_props, ref) {
+    const [hoveredPlayer, setHoveredPlayer] = useState(null);
+    const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+
+    useImperativeHandle(
+        ref,
+        () => ({
+            show(player, rect) {
+                setHoveredPlayer(player);
+                setTooltipPos(getOnlineTooltipPosition(rect));
+            },
+            hide() {
+                setHoveredPlayer(null);
+            },
+        }),
+        [],
+    );
+
+    return (
+        <div
+            className="fixed z-[200] pointer-events-none"
+            style={{
+                left: tooltipPos.x,
+                top: tooltipPos.y,
+                transform: "translate(-50%, -100%)",
+            }}
+        >
+            <AnimatePresence>
+                {hoveredPlayer && (
+                    <motion.div
+                        key={hoveredPlayer.id || "tooltip"}
+                        initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.9, y: 10 }}
+                        transition={{
+                            type: "spring",
+                            damping: 20,
+                            stiffness: 300,
+                        }}
+                        className="mb-4"
+                    >
+                        <PlayerTooltip
+                            player={hoveredPlayer}
+                            arrowOffsetX={tooltipPos.arrowOffsetX || 0}
+                        />
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    );
+});
+
+// Memoised: the once-prop list keeps the same identity across navigations,
+// so the ~100 links are not re-rendered on every layout render.
+// Link's hover-prefetch owns onMouseEnter/onMouseLeave, so the tooltip uses
+// the pointer equivalents.
+const OnlinePlayerList = memo(function OnlinePlayerList({ players, tooltipRef }) {
+    return (
+        <div className="contents">
+            {players.map((player, idx) => (
+                <Link
+                    key={`${player.displayName}-${idx}`}
+                    href={`/profile/${player.displayName}`}
+                    {...prefetchPropsFor(`/profile/${player.displayName}`)}
+                    onPointerEnter={(e) =>
+                        tooltipRef.current?.show(
+                            player,
+                            e.currentTarget.getBoundingClientRect(),
+                        )
+                    }
+                    onPointerLeave={() => tooltipRef.current?.hide()}
+                    className="group relative bg-transparent p-0 text-left leading-none transition-colors duration-150"
+                >
+                    <span className={`pointer-events-none block max-w-[130px] truncate text-[12px] transition-colors ${getPlayerBorderClass(player)} ${isExecutivePlayerName(player) ? 'font-black uppercase' : 'font-semibold lowercase'}`}>
+                        {formatOnlinePlayerName(player)}
+                    </span>
+                </Link>
+            ))}
+        </div>
+    );
+});
+
 export default function GameLayout({ children, wide = false, flush = false, noFlip = false }) {
     const { auth, flash, serverTime, onlinePlayers } = usePage().props;
     const { url } = usePage();
@@ -90,8 +195,7 @@ export default function GameLayout({ children, wide = false, flush = false, noFl
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [statsExpanded, setStatsExpanded] = useState(false);
     const [onlineFilter, setOnlineFilter] = useState("city");
-    const [hoveredPlayer, setHoveredPlayer] = useState(null);
-    const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+    const tooltipRef = useRef(null);
     const pagePath = useMemo(() => url.split("?")[0], [url]);
 
     //TODO: remove the conflict check
@@ -130,61 +234,133 @@ export default function GameLayout({ children, wide = false, flush = false, noFl
     }, [auth?.user?.is_banned, character?.is_dead, character?.is_hospitalized, character?.is_jailed]);
 
     const [isFlipped, setIsFlipped] = useState(false);
-    const [displayChildren, setDisplayChildren] = useState(children);
     const flipDisabled = noFlip || auth?.user?.disableCardFlip;
 
     const navSections = auth?.navigation || [];
 
+    // Latest committed values for the router listeners below, which are
+    // bound once for the lifetime of the (persistent) layout.
+    const navStateRef = useRef({ flipDisabled, pagePath });
+    useEffect(() => {
+        navStateRef.current = { flipDisabled, pagePath };
+    }, [flipDisabled, pagePath]);
+
     useEffect(() => {
         let mounted = true;
         let animationTimeout;
+        // A real (non-prefetch) visit is in flight.
+        let navigating = false;
+        // Hover prefetches fire global start/finish events too; they are
+        // background fetches and must not flip/unflip the card.
+        const prefetchVisits = new WeakSet();
 
-        const unbindStart = router.on("start", (event) => {
-            if (!mounted) return;
-
-            const visit = event.detail.visit;
-            const nextUrl = visit.url;
-            const nextPath =
-                typeof nextUrl === "string"
-                    ? nextUrl.split("?")[0]
-                    : nextUrl.pathname;
-
-            const bothMessages = pagePath.startsWith('/messages') && nextPath.startsWith('/messages');
-            if (!flipDisabled && visit.method === "get" && nextPath !== pagePath && !bothMessages) {
-                clearTimeout(animationTimeout);
-                setIsFlipped(true);
-            }
-        });
-
-        const unbindFinish = router.on("finish", () => {
-            if (!mounted) return;
-
+        const scheduleUnflip = () => {
             clearTimeout(animationTimeout);
             animationTimeout = setTimeout(() => {
                 if (mounted) {
                     setIsFlipped(false);
                 }
             }, 100);
+        };
+
+        // Flip on "before" rather than "start": a visit served from the
+        // prefetch cache never fires "start"/"finish".
+        const unbindBefore = router.on("before", (event) => {
+            if (!mounted || event.defaultPrevented) return;
+
+            const visit = event.detail.visit;
+
+            if (visit.prefetch) {
+                // On touch, a tap fires mouseenter right before click, so the
+                // Link's hover-prefetch timer would re-request the page the
+                // real visit is already loading. Skip prefetches meanwhile.
+                return navigating ? false : undefined;
+            }
+
+            navigating = true;
+
+            const { flipDisabled: disabled, pagePath: currentPath } = navStateRef.current;
+            const nextUrl = visit.url;
+            const nextPath =
+                typeof nextUrl === "string"
+                    ? nextUrl.split("?")[0]
+                    : nextUrl.pathname;
+
+            const bothMessages = currentPath.startsWith('/messages') && nextPath.startsWith('/messages');
+            if (!disabled && visit.method === "get" && nextPath !== currentPath && !bothMessages) {
+                clearTimeout(animationTimeout);
+                setIsFlipped(true);
+            }
         });
+
+        const unbindStart = router.on("start", (event) => {
+            const visit = event.detail.visit;
+            if (visit.prefetch) {
+                prefetchVisits.add(visit);
+            }
+        });
+
+        // Cache hits only fire "success"; regular visits fire "success" then
+        // "finish", and "finish" re-arms the timer, so the unflip still lands
+        // 100ms after "finish" exactly as before.
+        const unbindSuccess = router.on("success", () => {
+            if (!mounted) return;
+            navigating = false;
+            scheduleUnflip();
+        });
+
+        const unbindFinish = router.on("finish", (event) => {
+            if (!mounted) return;
+
+            const visit = event.detail.visit;
+            if (prefetchVisits.has(visit)) return;
+
+            navigating = false;
+
+            // Prefetched pages carry pre-mutation shared props (cash, timers,
+            // health...). Drop them after any non-GET visit.
+            if (visit.method !== "get") {
+                router.flushAll();
+            }
+
+            scheduleUnflip();
+        });
+
+        // A prefetched response that ends in errors/invalid/exception never fires
+        // "success", and cache hits never fire "finish"; settle the card here too
+        // so it can't stay flipped.
+        const unbindSettled = ["error", "invalid", "exception"].map((type) =>
+            router.on(type, () => {
+                if (!mounted) return;
+                navigating = false;
+                scheduleUnflip();
+            }),
+        );
 
         return () => {
             mounted = false;
             clearTimeout(animationTimeout);
+            unbindBefore();
             unbindStart();
+            unbindSuccess();
             unbindFinish();
+            unbindSettled.forEach((unbind) => unbind());
         };
-    }, [flipDisabled, pagePath]);
+    }, []);
 
-    useEffect(() => {
-        if (isFlipped) {
-            if (children !== displayChildren) {
-                setDisplayChildren(children);
-            }
-        } else {
-            setDisplayChildren(children);
-        }
-    }, [children, isFlipped]);
-
+    // onlinePlayers is a once-prop holding the global list; the city tab is
+    // derived here from each row's cityId.
+    const globalOnlineList = onlinePlayers?.globalList;
+    const currentCityId = character?.cityId;
+    const cityOnlineList = useMemo(
+        () =>
+            globalOnlineList
+                ?.filter((p) => p.cityId === currentCityId)
+                .slice(0, 50),
+        [globalOnlineList, currentCityId],
+    );
+    const currentOnlineList =
+        onlineFilter === "city" ? cityOnlineList : globalOnlineList;
 
     const handleFilterChange = (newFilter) => {
         setOnlineFilter(newFilter);
@@ -236,12 +412,13 @@ export default function GameLayout({ children, wide = false, flush = false, noFl
             )}
 
             <header className="h-12 border-b border-slate-800/50 flex items-center justify-between px-3 sm:px-5 bg-slate-950/80 sticky top-0 z-50">
-                <button
-                    onClick={() => (window.location.href = "/dashboard")}
+                <Link
+                    href="/dashboard"
+                    {...prefetchPropsFor("/dashboard")}
                     className="font-bold text-sm hover:text-cyan-400 transition whitespace-nowrap"
                 >
                     THE <span className="text-cyan-400">DIRECTOR</span>
-                </button>
+                </Link>
 
                 <div className="flex-1 min-w-0 flex items-center justify-center mx-2 overflow-hidden">
                     <div className="flex items-center gap-1 shrink-0">
@@ -464,6 +641,7 @@ export default function GameLayout({ children, wide = false, flush = false, noFl
                                                     <div className="flex items-center">
                                                         <Link
                                                             href={item.href}
+                                                            {...prefetchPropsFor(item.href)}
                                                             onClick={() => setDrawerOpen(false)}
                                                             className="flex-1 px-4 py-2.5 flex items-center justify-between text-slate-300 hover:text-white hover:bg-slate-800/40 transition text-left group"
                                                         >
@@ -551,6 +729,7 @@ export default function GameLayout({ children, wide = false, flush = false, noFl
                                                             {item.isTechnician && (
                                                                 <Link
                                                                     href="/career/technician"
+                                                                    {...prefetchPropsFor("/career/technician")}
                                                                     onClick={() => setDrawerOpen(false)}
                                                                     className="w-full flex items-center gap-3 px-4 py-2 pl-[44px] text-left text-[11px] font-bold uppercase tracking-wider transition text-slate-400 hover:text-cyan-400 hover:bg-slate-800/40"
                                                                 >
@@ -561,6 +740,7 @@ export default function GameLayout({ children, wide = false, flush = false, noFl
                                                             {item.isCustoms && (
                                                                 <Link
                                                                     href="/career/customs"
+                                                                    {...prefetchPropsFor("/career/customs")}
                                                                     onClick={() => setDrawerOpen(false)}
                                                                     className="w-full flex items-center gap-3 px-4 py-2 pl-[44px] text-left text-[11px] font-bold uppercase tracking-wider transition text-slate-400 hover:text-cyan-400 hover:bg-slate-800/40"
                                                                 >
@@ -571,6 +751,7 @@ export default function GameLayout({ children, wide = false, flush = false, noFl
                                                             {item.hasActions && item.actionsUrl && (
                                                                 <Link
                                                                     href={item.actionsUrl}
+                                                                    {...prefetchPropsFor(item.actionsUrl)}
                                                                     onClick={() => setDrawerOpen(false)}
                                                                     className="w-full flex items-center gap-3 px-4 py-2 pl-[44px] text-left text-[11px] font-bold uppercase tracking-wider transition text-slate-400 hover:text-cyan-400 hover:bg-slate-800/40"
                                                                 >
@@ -731,6 +912,7 @@ export default function GameLayout({ children, wide = false, flush = false, noFl
                                             <div className="flex items-center">
                                                 <Link
                                                     href={item.href}
+                                                    {...prefetchPropsFor(item.href)}
                                                     className="flex-1 px-4 py-2.5 flex items-center justify-between text-slate-300 hover:text-white hover:bg-slate-800/40 transition text-left group"
                                                 >
                                                     <div className="flex items-center gap-3">
@@ -817,6 +999,7 @@ export default function GameLayout({ children, wide = false, flush = false, noFl
                                                     {item.isTechnician && (
                                                         <Link
                                                             href="/career/technician"
+                                                            {...prefetchPropsFor("/career/technician")}
                                                             className="w-full flex items-center gap-3 px-4 py-2 pl-[44px] text-left text-[11px] font-bold uppercase tracking-wider transition text-slate-400 hover:text-cyan-400 hover:bg-slate-800/40"
                                                         >
                                                             <Wrench size={12} className="shrink-0" />
@@ -826,6 +1009,7 @@ export default function GameLayout({ children, wide = false, flush = false, noFl
                                                     {item.isCustoms && (
                                                         <Link
                                                             href="/career/customs"
+                                                            {...prefetchPropsFor("/career/customs")}
                                                             className="w-full flex items-center gap-3 px-4 py-2 pl-[44px] text-left text-[11px] font-bold uppercase tracking-wider transition text-slate-400 hover:text-cyan-400 hover:bg-slate-800/40"
                                                         >
                                                             <AirplaneTilt size={12} className="shrink-0" />
@@ -835,6 +1019,7 @@ export default function GameLayout({ children, wide = false, flush = false, noFl
                                                     {item.hasActions && item.actionsUrl && (
                                                         <Link
                                                             href={item.actionsUrl}
+                                                            {...prefetchPropsFor(item.actionsUrl)}
                                                             className="w-full flex items-center gap-3 px-4 py-2 pl-[44px] text-left text-[11px] font-bold uppercase tracking-wider transition text-slate-400 hover:text-cyan-400 hover:bg-slate-800/40"
                                                         >
                                                             <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-slate-600"></span>
@@ -896,7 +1081,7 @@ export default function GameLayout({ children, wide = false, flush = false, noFl
                                     WebkitBackfaceVisibility: "hidden",
                                 }}
                             >
-                                {displayChildren}
+                                {children}
                             </div>
                             <div
                                 className="absolute inset-0 bg-slate-900/90 backdrop-blur-md border border-slate-700 flex flex-col items-center justify-center rounded-xl overflow-hidden"
@@ -955,54 +1140,17 @@ export default function GameLayout({ children, wide = false, flush = false, noFl
                                         Online list unavailable
                                     </div>
                                 ) : (
-                                    (() => {
-                                        const currentList =
-                                            onlineFilter === "city"
-                                                ? onlinePlayers?.cityList
-                                                : onlinePlayers?.globalList;
-                                        return currentList &&
-                                            currentList.length > 0 ? (
-                                            <div
-                                                key="player-list-container"
-                                                className="contents"
-                                            >
-                                                {currentList.map((player, idx) => (
-                                                    <button
-                                                        key={`${player.displayName}-${idx}`}
-                                                        onClick={() =>
-                                                            router.get(
-                                                                `/profile/${player.displayName}`,
-                                                            )
-                                                        }
-                                                        onMouseEnter={(
-                                                            e,
-                                                        ) => {
-                                                            const rect =
-                                                                e.currentTarget.getBoundingClientRect();
-                                                            setHoveredPlayer(
-                                                                player,
-                                                            );
-                                                            setTooltipPos(getOnlineTooltipPosition(rect));
-                                                        }}
-                                                        onMouseLeave={() =>
-                                                            setHoveredPlayer(
-                                                                null,
-                                                            )
-                                                        }
-                                                        className="group relative bg-transparent p-0 text-left leading-none transition-colors duration-150"
-                                                    >
-                                                        <span className={`pointer-events-none block max-w-[130px] truncate text-[12px] transition-colors ${getPlayerBorderClass(player)} ${isExecutivePlayerName(player) ? 'font-black uppercase' : 'font-semibold lowercase'}`}>
-                                                            {formatOnlinePlayerName(player)}
-                                                        </span>
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        ) : (
-                                            <div className="py-2 text-xs font-semibold text-cyan-100/70">
-                                                No other active connections
-                                            </div>
-                                        );
-                                    })()
+                                    currentOnlineList &&
+                                    currentOnlineList.length > 0 ? (
+                                        <OnlinePlayerList
+                                            players={currentOnlineList}
+                                            tooltipRef={tooltipRef}
+                                        />
+                                    ) : (
+                                        <div className="py-2 text-xs font-semibold text-cyan-100/70">
+                                            No other active connections
+                                        </div>
+                                    )
                                 )}
                             </div>
                         </div>
@@ -1013,16 +1161,17 @@ export default function GameLayout({ children, wide = false, flush = false, noFl
             <div className="nav:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-md border-t border-slate-800/50">
                 <div className="flex items-center justify-around h-14">
                     {getBottomTabs(character).map((tab) => (
-                        <button
+                        <Link
                             key={tab.label}
-                            onClick={() => router.get(tab.href)}
+                            href={tab.href}
+                            {...prefetchPropsFor(tab.href)}
                             className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-slate-400 hover:text-cyan-400 transition"
                         >
                             <tab.icon size={18} />
                             <span className="text-[10px] font-medium">
                                 {tab.label}
                             </span>
-                        </button>
+                        </Link>
                     ))}
                     <button
                         onClick={() => setDrawerOpen(true)}
@@ -1035,36 +1184,7 @@ export default function GameLayout({ children, wide = false, flush = false, noFl
             </div>
 
             { }
-            <div
-                className="fixed z-[200] pointer-events-none"
-                style={{
-                    left: tooltipPos.x,
-                    top: tooltipPos.y,
-                    transform: "translate(-50%, -100%)",
-                }}
-            >
-                <AnimatePresence>
-                    {hoveredPlayer && (
-                        <motion.div
-                            key={hoveredPlayer.id || "tooltip"}
-                            initial={{ opacity: 0, scale: 0.9, y: 10 }}
-                            animate={{ opacity: 1, scale: 1, y: 0 }}
-                            exit={{ opacity: 0, scale: 0.9, y: 10 }}
-                            transition={{
-                                type: "spring",
-                                damping: 20,
-                                stiffness: 300,
-                            }}
-                            className="mb-4"
-                        >
-                            <PlayerTooltip
-                                player={hoveredPlayer}
-                                arrowOffsetX={tooltipPos.arrowOffsetX || 0}
-                            />
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-            </div>
+            <OnlinePlayerTooltip ref={tooltipRef} />
 
         </div>
     );

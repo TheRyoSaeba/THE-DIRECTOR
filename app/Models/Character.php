@@ -577,7 +577,13 @@ class Character extends Model
     }
 
 
-    public static function getOnlinePlayersOptimized(int $cityId): array
+    /**
+     * Global online list (most recently active first, max 100). Each row
+     * carries its current cityId so the client can derive the per-city tab
+     * itself — one shared cache entry instead of one per city, and the
+     * payload no longer ships a second (city) copy of the same rows.
+     */
+    public static function getOnlinePlayersOptimized(): array
     {
 
         $recentDeathCutoff = now()->subMinutes(35);
@@ -653,16 +659,11 @@ class Character extends Model
 
         $globalResults = $globalQuery->get();
 
-        $cityResults = $globalResults
-            ->filter(fn($row) => $row->city_id == $cityId)
-            ->take(50);
-
-        $allResults = $globalResults->merge($cityResults);
-        $careerIds = $allResults->pluck("career_id")->unique()->toArray();
-        $rankLevels = $allResults->pluck("career_rank")->unique()->toArray();
+        $careerIds = $globalResults->pluck("career_id")->unique()->toArray();
+        $rankLevels = $globalResults->pluck("career_rank")->unique()->toArray();
         $ranks = CareerRank::bulkLoadForCharacters($careerIds, $rankLevels);
 
-        $deadCharacterIds = $allResults
+        $deadCharacterIds = $globalResults
             ->filter(fn($row) => ! is_null($row->deleted_at))
             ->pluck('id')
             ->unique()
@@ -689,6 +690,7 @@ class Character extends Model
 
             return [
                 "displayName" => $row->display_name,
+                "cityId" => (int) $row->city_id,
                 "avatarUrl" =>
                     $row->custom_avatar_url ?: $rank["avatar_url"] ?? null,
                 "rank" => $rankName,
@@ -713,13 +715,8 @@ class Character extends Model
             ];
         };
 
-        $cityList = $cityResults->map($mapPlayer)->values()->toArray();
-        $globalList = $globalResults->map($mapPlayer)->values()->toArray();
-
         return [
-            "cityList" => $cityList,
-            "globalList" => $globalList,
-
+            "globalList" => $globalResults->map($mapPlayer)->values()->toArray(),
         ];
     }
 

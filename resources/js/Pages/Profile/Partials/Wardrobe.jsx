@@ -5,7 +5,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Bomb } from '@phosphor-icons/react/dist/ssr';
 
 export default function Wardrobe({
-    catalogItems = [],
     characterItems = [],
     readOnly = false,
     propertyCondition = null,

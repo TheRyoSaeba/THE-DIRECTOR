@@ -45,10 +45,16 @@ class MessageController extends Controller
             }
         }
 
+        // Latest 50 messages, displayed oldest-first (the scope's own ASC ordering is
+        // replaced so the LIMIT keeps the newest rows rather than the oldest).
         $messages = Message::forConversation($character->id, $otherCharacterId, $groupId)
-            ->orderBy('created_at', 'asc')
+            ->reorder()
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
             ->limit(50)
-            ->get();
+            ->get()
+            ->reverse()
+            ->values();
 
         $senderIds = $messages->pluck('sender_id')->unique()->toArray();
         if (!empty($senderIds)) {

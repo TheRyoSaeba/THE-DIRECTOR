@@ -15,47 +15,38 @@
     <meta property="og:title" content="TheDirector | Greed is Good." />
     <meta property="og:description" content="A strategic game where corporate rules, political governance, and player choice determine whether you survive or thrive." />
       
-    <!-- Fonts -->
+    {{-- Fonts: own <link> so it loads in parallel with app.css instead of chaining behind a CSS @import --}}
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
 
     <!-- Google AdSense (static head tag; not managed by Inertia) -->
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1145262174285661" crossorigin="anonymous"></script>
 
-    <!-- Vite directives -->
-    @viteReactRefresh
-
-    @if (app()->environment('local') && file_exists(base_path('public/hot')))
-        <!-- Development mode - Vite dev server is running -->
-        @vite(['resources/css/app.css', 'resources/js/app.tsx'])
-    @else
-        <!-- Production mode - Use built assets -->
-        @php
-            $manifestPath = public_path('build/manifest.json');
-            $viteManifestPath = public_path('build/.vite/manifest.json');
-
-            if (file_exists($manifestPath)) {
-                $manifest = json_decode(file_get_contents($manifestPath), true);
-            } elseif (file_exists($viteManifestPath)) {
-                $manifest = json_decode(file_get_contents($viteManifestPath), true);
+    {{-- Vite: entry + current page component, so Laravel emits modulepreload tags for
+         the entry, its vendor chunks and the page chunk (and its imports) up front.
+         Uses the dev server automatically when public/hot exists. --}}
+    @php
+        $pageComponent = $page['component'] ?? null;
+        $pageEntry = null;
+        if (is_string($pageComponent) && preg_match('#^[A-Za-z0-9_\-]+(/[A-Za-z0-9_\-]+)*$#', $pageComponent)) {
+            foreach (['tsx', 'jsx'] as $ext) {
+                if (file_exists(resource_path("js/Pages/{$pageComponent}.{$ext}"))) {
+                    $pageEntry = "resources/js/Pages/{$pageComponent}.{$ext}";
+                    break;
+                }
             }
-        @endphp
+        }
+    @endphp
+    @viteReactRefresh
+    @vite(array_values(array_filter(['resources/css/app.css', 'resources/js/app.tsx', $pageEntry])))
 
-        @if (isset($manifest['resources/js/app.tsx']))
-            <script type="module" src="{{ asset('build/' . $manifest['resources/js/app.tsx']['file']) }}"></script>
-            @if (isset($manifest['resources/js/app.tsx']['css']))
-                @foreach ($manifest['resources/js/app.tsx']['css'] as $css)
-                    <link rel="stylesheet" href="{{ asset('build/' . $css) }}">
-                @endforeach
-            @endif
-        @endif
-
-        @if (isset($manifest['resources/css/app.css']))
-            <link rel="stylesheet" href="{{ asset('build/' . $manifest['resources/css/app.css']['file']) }}">
-        @endif
+    {{-- Admins get every named route; everyone else gets the 'player' group (no admin.*). --}}
+    @if (auth()->user()?->is_admin)
+        @routes
+    @else
+        @routes('player')
     @endif
-
-    @routes
     @inertiaHead
 </head>
 

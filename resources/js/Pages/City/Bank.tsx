@@ -699,6 +699,27 @@ function CertificatesPanel({ bankData }: { bankData: BankData }) {
 interface Resident { id: number; name: string; }
 interface LedgerChar { id: number; name: string; avatar_url: string | null; bank_balance: number; transactions: Transaction[]; }
 
+// Minimal JSON GET (replaces window.axios): rejects on non-2xx with the parsed body
+// attached as `response.data`, so callers can keep reading `e.response.data.error`.
+async function getJson<T>(url: string, params?: Record<string, string | number>): Promise<T> {
+    const qs = params ? `?${new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)]))}` : '';
+    const xsrf = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/)?.[1];
+    const res = await fetch(url + qs, {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: {
+            Accept: 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+            ...(xsrf ? { 'X-XSRF-TOKEN': decodeURIComponent(xsrf) } : {}),
+        },
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+        throw Object.assign(new Error(`Request failed with status ${res.status}`), { response: { status: res.status, data } });
+    }
+    return data as T;
+}
+
 function LedgerPanel({ citySlug }: { citySlug: string }) {
     const [residents, setResidents] = useState<Resident[]>([]);
     const [loadingPicker, setLoadingPicker] = useState(true);
@@ -710,8 +731,8 @@ function LedgerPanel({ citySlug }: { citySlug: string }) {
     const [page, setPage] = useState(1);
 
     useEffect(() => {
-        (window as any).axios.get(`/${citySlug}/bank/ledger/residents`)
-            .then(({ data }: { data: Resident[] }) => setResidents(data))
+        getJson<Resident[]>(`/${citySlug}/bank/ledger/residents`)
+            .then((data) => setResidents(data))
             .catch((e: any) => setPickerError(e?.response?.data?.error ?? "Failed to load."))
             .finally(() => setLoadingPicker(false));
     }, [citySlug]);
@@ -721,7 +742,7 @@ function LedgerPanel({ citySlug }: { citySlug: string }) {
         if (!n) return;
         setSelectedId(n); setCharDetail(null); setCharError(null); setLoadingChar(true); setPage(1);
         try {
-            const { data } = await (window as any).axios.get(`/${citySlug}/bank/ledger/character`, { params: { character_id: n } }) as { data: LedgerChar };
+            const data = await getJson<LedgerChar>(`/${citySlug}/bank/ledger/character`, { character_id: n });
             setCharDetail(data);
         } catch (e: any) {
             setCharError(e?.response?.data?.error ?? "Failed to load.");

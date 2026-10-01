@@ -246,14 +246,7 @@ export default function City({ cityData, services, cityNews = null, population =
 
     return (
         <>
-            <Head title={`${cityData.name} — TheDirector`}>
-                <script
-                    head-key="adsense-loader"
-                    async
-                    src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1145262174285661"
-                    crossOrigin="anonymous"
-                />
-            </Head>
+            <Head title={`${cityData.name} — TheDirector`} />
 
             <div className="w-full max-w-5xl mx-auto flex flex-col h-full">
 

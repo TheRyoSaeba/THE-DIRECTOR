@@ -34,18 +34,6 @@ class SettingsController extends Controller
                 'disableCardFlip' => (bool) $user->disable_card_flip,
                 'emailOptOut' => $user->email_opt_out_at !== null,
             ],
-            'catalogItems' => \App\Models\GameItem::active()->orderBy('name')->limit(1000)->get()->map(fn($item) => [
-                'id' => $item->id,
-                'name' => $item->name,
-                'slug' => $item->slug,
-                'type' => $item->type,
-                'slot' => $item->slot,
-                'description' => $item->description,
-                'image_url' => $item->image_url,
-                'price' => $item->price,
-                'stock' => $item->stock,
-                'condition_percent' => $item->durability > 0 ? 100 : null,
-            ]),
             'characterItems' => $character->items()
                 ->whereHas('template')
                 ->with('template')
