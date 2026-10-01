@@ -10,7 +10,6 @@ use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Middleware;
-use Tighten\Ziggy\Ziggy;
 
 class HandleInertiaRequests extends Middleware
 {
@@ -83,25 +82,6 @@ class HandleInertiaRequests extends Middleware
         };
 
         return array_merge(parent::share($request), $flashShare, [
-            "ziggy" => function () use ($user, $request) {
-                $role = match (true) {
-                    $user?->is_admin => "admin",
-                    $user !== null => "user",
-                    default => "guest",
-                };
-
-                $filtered = SafeCache::remember("ziggy_routes_{$role}_v1", 3600, function () use ($role) {
-                    $ziggy = new Ziggy();
-
-                    return match ($role) {
-                        "admin" => $ziggy->toArray(),
-                        "user" => $ziggy->filter(["!admin.*"])->toArray(),
-                        default => $ziggy->filter(["public"])->toArray(),
-                    };
-                }, []);
-
-                return array_merge($filtered, ["location" => $request->url()]);
-            },
             "serverTime" => Inertia::always(fn() => Carbon::now("UTC")->format('Y-m-d\TH:i:s\Z')),
             "auth" => $user
                 ? [
@@ -110,10 +90,7 @@ class HandleInertiaRequests extends Middleware
                         "disableCardFlip" => (bool) $user->disable_card_flip,
                         // is_admin removed — was only ever read by the React
                         // wiki, which is now Blade. The remaining server-side
-                        // admin gates use $user->is_admin directly, and the
-                        // ziggy bundle is still role-split (line ~87), so
-                        // admins still see their admin routes — they just
-                        // don't need a client-side flag to do it.
+                        // admin gates use $user->is_admin directly.
                     ],
                     "navigation" => fn() => $this->getNavigation(
                         $user,
@@ -130,7 +107,16 @@ class HandleInertiaRequests extends Middleware
                     ),
                 ]
                 : null,
-            "onlinePlayers" => fn() => $this->getOnlinePlayers($user, $character),
+            // Once-prop: the client keeps its copy across navigations and
+            // sends its key in X-Inertia-Except-Once-Props while it is fresh,
+            // so the server skips resolving/serialising the ~45 KB list on
+            // most visits. While the list is hidden (hospital/jail/dead/no
+            // character) it is always re-sent (fresh) with a 1s expiry, so a
+            // stale list never lingers and the real list returns on the very
+            // next visit after release.
+            "onlinePlayers" => $this->onlinePlayersHidden($character)
+                ? Inertia::once(fn() => null)->fresh()->until(1)
+                : Inertia::once(fn() => $this->getOnlinePlayers())->until(30),
         ]);
     }
 
@@ -204,6 +190,7 @@ class HandleInertiaRequests extends Middleware
             "career" => $character->career->name ?? "Unknown",
             "cityName" => $character->city->name ?? "Unknown",
             "citySlug" => $character->city->slug ?? "unknown",
+            "cityId" => $character->city_id,
             "homeCity" => $character->homeCity->name ?? "Unknown",
             "health" => $character->health,
             "maxHealth" => $character->max_health,
@@ -378,27 +365,21 @@ class HandleInertiaRequests extends Middleware
         return $sections;
     }
 
-    private function getOnlinePlayers($user, $character): ?array
+    private function onlinePlayersHidden($character): bool
     {
-        if (
-            !$character ||
+        return !$character ||
             $character->trashed() ||
             $character->timers?->hospital_until?->isFuture() ||
-            $character->timers?->jail_until?->isFuture()
-        ) {
-            return null;
-        }
+            $character->timers?->jail_until?->isFuture();
+    }
 
-        $cityId = $character->city_id;
-
-        $cacheKey = "online_players_city_{$cityId}";
-        $cacheTtl = 10;
-
-        return SafeCache::remember($cacheKey, $cacheTtl, function () use ($cityId) {
-            return Character::getOnlinePlayersOptimized($cityId);
-        }, [
-            'cityList' => [],
-            'globalList' => [],
-        ]);
+    private function getOnlinePlayers(): array
+    {
+        return SafeCache::remember(
+            "online_players_global_v2",
+            10,
+            fn() => Character::getOnlinePlayersOptimized(),
+            ["globalList" => []],
+        );
     }
 }

@@ -4,6 +4,9 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 
 const ClockContext = createContext(null);
 
+// Larger than the prefetch cache window (GameLayout PREFETCH_CACHE_FOR).
+const MAX_STALE_RESYNC_SECONDS = 10;
+
 const parseServerUnix = (time) => {
     const parsed = Math.floor(new Date(time).getTime() / 1000);
     return Number.isFinite(parsed) ? parsed : Math.floor(Date.now() / 1000);
@@ -23,12 +26,20 @@ export function ClockProvider({ initialTime, children }) {
     }, []);
 
     const syncServerClock = useCallback((time) => {
+        const incoming = parseServerUnix(time);
+        // Pages served from the prefetch cache carry a serverTime that can be a
+        // few seconds old. Only let a re-sync move the clock backwards when the
+        // gap is large enough to be a real correction, so countdowns never tick
+        // back up after navigating to a prefetched page.
+        if (incoming < readClock() && readClock() - incoming <= MAX_STALE_RESYNC_SECONDS) {
+            return;
+        }
         anchor.current = {
-            serverUnix: parseServerUnix(time),
+            serverUnix: incoming,
             perfNow: performance.now(),
         };
         setServerClock(anchor.current.serverUnix);
-    }, []);
+    }, [readClock]);
 
     useEffect(() => {
         const tick = () => {
