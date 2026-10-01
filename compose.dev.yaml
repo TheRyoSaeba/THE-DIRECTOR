@@ -1,5 +1,5 @@
 # Local development stack: docker compose -f compose.dev.yaml up
-# Uses your existing .env (Neon database, Google OAuth); only Redis is containerised.
+# Local dev stack. First time: see docker/dev/README.md (clone, .env, migrate).
 services:
   app:
     build:
