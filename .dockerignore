@@ -27,3 +27,6 @@ npm-debug.log
 yarn-error.log
 frankenphp
 public/frankenphp-worker.php
+
+# Local dev/measurement harness (not part of the image)
+tools/
