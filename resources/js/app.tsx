@@ -3,6 +3,7 @@ import '../css/app.css';
 import { createRoot } from 'react-dom/client'
 import { createInertiaApp, router } from '@inertiajs/react'
 import { ClockProvider } from '@/contexts/ClockContext'
+import { MotionConfig } from 'framer-motion'
 
 
 // @ts-ignore
@@ -47,9 +48,13 @@ createInertiaApp({
     setup({ el, App, props }) {
         const initialServerTime = props.initialPage?.props?.serverTime || new Date().toISOString()
         createRoot(el).render(
-            <ClockProvider initialTime={initialServerTime}>
-                <App {...props} />
-            </ClockProvider>
+            // reducedMotion="user": framer-motion drops transform/layout
+            // animations (keeps opacity) when the OS asks for reduced motion.
+            <MotionConfig reducedMotion="user">
+                <ClockProvider initialTime={initialServerTime}>
+                    <App {...props} />
+                </ClockProvider>
+            </MotionConfig>
         )
     },
     progress: {

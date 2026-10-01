@@ -1,4 +1,4 @@
-import { usePage } from '@inertiajs/react';
+import { Link, usePage } from '@inertiajs/react';
 import React, { useMemo } from 'react';
 import {
     User, MapPin, Briefcase, Heart, SignOut, Gear,
@@ -6,10 +6,11 @@ import {
     Users, Globe, CaretDown, CaretUp, Sword, Scales, ChartBar,
     Article, ChatTeardrop, Question, Car, Barbell,
     List, X, TrendUp, Shield, FirstAidKit, Gavel, Bank, Lightbulb, Lightning, Wrench,
-    Desk, ChartLineDown,
+    Desk, ChartLineDown, GraduationCap,
     BuildingOffice, OfficeChair, Megaphone
 } from '@phosphor-icons/react';
 import { useServerClock } from '@/contexts/ClockContext';
+import { useCountdown, formatDuration } from '@/Components/ui/Countdown';
 
 export const glowColors = {
     cyan: { gradient: 'from-cyan-500 to-blue-500', label: 'Cyan' },
@@ -34,14 +35,34 @@ export const formatRemaining = (seconds) => {
     return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 };
 
+// Icons match the nav items they link to (Work/Actions/Talents/Conflict).
 export const TIMER_KEYS = [
-    { key: 'next_work_at', label: 'Work', icon: Briefcase, weight: 'bold' },
-    { key: 'next_action_at', label: 'Action', icon: Clock, weight: 'bold' },
-    { key: 'next_study_at', label: 'Study', icon: ChartBar, weight: 'bold' },
-    { key: 'next_travel_at', label: 'Travel', icon: Car, weight: 'bold' },
-    { key: 'next_talents_at', label: 'Talents', icon: Trophy, weight: 'fill' },
-    { key: 'next_conflict_at', label: 'Combat', icon: Sword, weight: 'fill' },
+    { key: 'next_work_at', label: 'Work', icon: Briefcase, weight: 'bold', href: () => '/work' },
+    { key: 'next_action_at', label: 'Action', icon: Lightning, weight: 'bold', href: () => '/actions' },
+    { key: 'next_study_at', label: 'Study', icon: GraduationCap, weight: 'bold', href: (c) => `/${c?.citySlug || 'city'}/university` },
+    { key: 'next_travel_at', label: 'Travel', icon: Car, weight: 'bold', href: (c) => `/${c?.citySlug || 'city'}/transit-hub` },
+    { key: 'next_talents_at', label: 'Talents', icon: Lightbulb, weight: 'bold', href: () => '/talents' },
+    { key: 'next_conflict_at', label: 'Combat', icon: Sword, weight: 'fill', href: () => '/conflict' },
 ];
+
+// Hover-prefetch cache window. Game state changes often, so keep it short;
+// any non-GET visit also flushes the whole prefetch cache (GameLayout).
+export const PREFETCH_CACHE_FOR = "5s";
+
+// GET /journal and GET /messages mark entries as read, so prefetching them
+// would mark things read that the player never saw.
+const NO_PREFETCH_PATHS = ["/journal", "/messages"];
+
+export const prefetchPropsFor = (href) => {
+    const path = typeof href === "string" ? href.split("?")[0] : "";
+    if (
+        !path ||
+        NO_PREFETCH_PATHS.some((p) => path === p || path.startsWith(`${p}/`))
+    ) {
+        return {};
+    }
+    return { prefetch: "hover", cacheFor: PREFETCH_CACHE_FOR };
+};
 
 export const formatUTC = (timestamp, includeTime = true) => {
     if (!timestamp) return 'Recently';
@@ -138,11 +159,14 @@ export const parseSymbolicAmount = (value) => {
     return isNaN(parsed) ? 0 : parsed;
 };
 
+// Mobile bottom bar (4 tabs + "More"). Work and Actions are the two timed
+// loops every career cycles through; Conflict lives in the drawer (Power) and
+// on the Combat cooldown chip. Messages stays for its unread badge.
 export const getBottomTabs = (character) => [
     { label: 'Work', icon: Briefcase, href: '/work', weight: 'bold' },
+    { label: 'Actions', icon: Lightning, href: '/actions', weight: 'bold' },
     { label: 'City', icon: Buildings, href: `/${character?.citySlug || 'city'}`, weight: 'bold' },
-    { label: 'Conflict', icon: Sword, href: '/conflict', weight: 'fill' },
-    { label: 'Messages', icon: ChatTeardrop, href: '/messages', weight: 'bold' },
+    { label: 'Messages', icon: ChatTeardrop, href: '/messages', weight: 'bold', badgeFrom: '/messages' },
 ];
 
 // City background images - add new cities here, death overrides all of these
@@ -441,44 +465,76 @@ export const ClockDisplay = React.memo(function ClockDisplay() {
     );
 });
 
-export const CooldownDisplay = React.memo(function CooldownDisplay({ timerKey, label, icon: Icon, weight }) {
+const timerTarget = (timers, timerKey) => {
+    const v = Number(timers?.[timerKey]);
+    return Number.isFinite(v) ? v : 0;
+};
+
+/**
+ * One cooldown chip: a Link to the page that spends the cooldown, with its
+ * icon and a server-clock countdown. tabular-nums + fixed min-width keep the
+ * header from shifting as digits change; "Ready" turns the chip emerald.
+ * variant "header" = compact desktop chip (label from xl up),
+ * variant "tile"   = 44px mobile HUD tile.
+ */
+export const CooldownDisplay = React.memo(function CooldownDisplay({ timerKey, label, icon: Icon, weight, href, variant = 'header' }) {
     const { auth } = usePage().props;
-    const serverClock = useServerClock();
-    const timers = auth?.character?.timers;
+    const { remaining, ready } = useCountdown(timerTarget(auth?.character?.timers, timerKey));
+    const text = ready ? 'Ready' : formatDuration(remaining);
 
-    const remaining = useMemo(() => {
-        if (!timers || timers[timerKey] == null) return 0;
-        const timerValue = Number(timers[timerKey]);
-        if (isNaN(timerValue)) return 0;
-        return Math.max(0, timerValue - serverClock);
-    }, [timers, timerKey, serverClock]);
-
-    const formatted = formatRemaining(remaining);
-    const ready = remaining === 0;
+    if (variant === 'tile') {
+        return (
+            <Link
+                href={href}
+                {...prefetchPropsFor(href)}
+                aria-label={`${label}: ${text}`}
+                className={`flex min-h-[44px] items-center gap-2 rounded-lg border px-2.5 transition-colors ${ready
+                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                    : 'border-slate-800 bg-slate-900/60 text-slate-300 hover:border-slate-700'}`}
+            >
+                <Icon size={16} weight={weight} className={`shrink-0 ${ready ? 'text-emerald-400' : 'text-slate-400'}`} aria-hidden />
+                <span className="min-w-0 leading-tight">
+                    <span className="block text-label uppercase text-slate-400">{label}</span>
+                    <span className="block text-xs font-semibold tabular-nums">{text}</span>
+                </span>
+            </Link>
+        );
+    }
 
     return (
-        <div className={`flex items-center gap-2 shrink-0 text-xs font-medium transition ${ready ? 'text-emerald-400' : 'text-slate-400'}`}>
-            <span className="font-semibold">{label}:</span>
-            <span className="font-semibold tabular-nums">{formatted}</span>
-        </div>
+        <Link
+            href={href}
+            {...prefetchPropsFor(href)}
+            title={`${label}: ${text}`}
+            aria-label={`${label}: ${text}`}
+            className={`group inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold transition-colors hover:bg-slate-800/70 ${ready ? 'text-emerald-400' : 'text-slate-300'}`}
+        >
+            <Icon size={14} weight={weight} aria-hidden className={`shrink-0 ${ready ? 'text-emerald-400' : 'text-slate-400 group-hover:text-cyan-400'}`} />
+            <span className="hidden xl:inline text-slate-400 group-hover:text-slate-200">{label}</span>
+            <span className="inline-block min-w-[7ch] tabular-nums">{text}</span>
+        </Link>
     );
 });
 
 export const CooldownsList = React.memo(function CooldownsList() {
+    const { auth } = usePage().props;
+    const character = auth?.character;
     return (
         <>
             {TIMER_KEYS.map((t) => (
-                <CooldownDisplay key={t.key} timerKey={t.key} label={t.label} icon={t.icon} weight={t.weight} />
+                <CooldownDisplay key={t.key} timerKey={t.key} label={t.label} icon={t.icon} weight={t.weight} href={t.href(character)} />
             ))}
         </>
     );
 });
 
 export const MobileCooldownsList = React.memo(function MobileCooldownsList() {
+    const { auth } = usePage().props;
+    const character = auth?.character;
     return (
-        <div className="flex flex-wrap gap-4">
+        <div className="grid grid-cols-2 gap-2 min-[400px]:grid-cols-3">
             {TIMER_KEYS.map((t) => (
-                <CooldownDisplay key={t.key} timerKey={t.key} label={t.label} icon={t.icon} weight={t.weight} />
+                <CooldownDisplay key={t.key} variant="tile" timerKey={t.key} label={t.label} icon={t.icon} weight={t.weight} href={t.href(character)} />
             ))}
         </div>
     );

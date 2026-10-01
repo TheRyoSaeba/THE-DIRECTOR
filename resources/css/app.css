@@ -17,31 +17,60 @@
 @tailwind utilities;
 
 @layer base {
+    /* Design tokens — "midnight noir". Bare HSL triplets so tailwind.config.js
+       can wrap them as hsl(var(--x) / <alpha-value>). Each maps to a Tailwind
+       palette step (noted) so tokens and raw slate-* classes match exactly.
+       Spec + contrast notes: resources/css/tokens.css and
+       resources/js/Components/ui/README.md. */
     :root {
-        --background: 222 47% 11%;
-        --foreground: 0 0% 98%;
-        --card: 240 10% 8%;
-        --card-foreground: 0 0% 98%;
-        --popover: 240 10% 8%;
-        --popover-foreground: 0 0% 98%;
-        --primary: 0 0% 98%;
-        --primary-foreground: 240 10% 4%;
-        --secondary: 240 10% 14%;
-        --secondary-foreground: 0 0% 98%;
-        --muted: 240 10% 14%;
-        --muted-foreground: 240 5% 55%;
-        --accent: 240 10% 14%;
-        --accent-foreground: 0 0% 98%;
-        --destructive: 0 62% 50%;
-        --destructive-foreground: 0 0% 98%;
-        --success: 142 72% 45%;
-        --success-foreground: 0 0% 98%;
-        --warning: 38 92% 50%;
-        --warning-foreground: 0 0% 98%;
-        --border: 240 6% 20%;
-        --input: 240 6% 20%;
-        --ring: 25 95% 53%;
+        color-scheme: dark;
+
+        --background: 228.6 84% 4.9%;            /* slate-950 */
+        --foreground: 210 40% 98%;               /* slate-50 */
+        --card: 222.2 47.4% 11.2%;               /* slate-900 */
+        --card-foreground: 210 40% 98%;
+        --popover: 222.2 47.4% 11.2%;            /* slate-900 */
+        --popover-foreground: 210 40% 98%;
+        --primary: 187.9 85.7% 53.3%;            /* cyan-400 */
+        --primary-foreground: 228.6 84% 4.9%;    /* slate-950 */
+        --secondary: 217.2 32.6% 17.5%;          /* slate-800 */
+        --secondary-foreground: 210 40% 98%;
+        --muted: 217.2 32.6% 17.5%;              /* slate-800 */
+        --muted-foreground: 215 20.2% 65.1%;     /* slate-400: secondary-text floor (7.9:1) */
+        --accent: 217.2 32.6% 17.5%;             /* slate-800 */
+        --accent-foreground: 210 40% 98%;
+        --destructive: 0 84.2% 60.2%;            /* red-500 */
+        --destructive-foreground: 210 40% 98%;
+        --success: 160.1 84.1% 39.4%;            /* emerald-500 */
+        --success-foreground: 210 40% 98%;
+        --warning: 37.7 92.1% 50.2%;             /* amber-500 */
+        --warning-foreground: 228.6 84% 4.9%;
+        --border: 217.2 32.6% 17.5%;             /* slate-800 */
+        --input: 215.3 25% 26.7%;                /* slate-700 */
+        --ring: 187.9 85.7% 53.3%;               /* cyan-400 (was orange) */
         --radius: 0.75rem;
+
+        /* Game tokens */
+        --cash-clean: 158.1 64.4% 51.6%;         /* emerald-400 */
+        --cash-dirty: 0 90.6% 70.8%;             /* red-400 */
+        --gold: 45.9 96.7% 64.5%;                /* amber-300 */
+
+        /* Shell metrics */
+        --header-h: 3rem;                        /* header h-12 */
+        --bottom-bar-h: 3.5rem;                  /* mobile tab bar h-14 */
+    }
+
+    /* Keyboard focus ring for anything not on the UI kit yet. :where() keeps
+       specificity at 0 so any focus utility on the element wins. Mouse/touch
+       clicks never show it (focus-visible). */
+    :where(a, button, summary, input, select, textarea, [role="button"], [role="tab"], [tabindex]:not([tabindex="-1"])):focus-visible {
+        outline: 2px solid hsl(var(--ring));
+        outline-offset: 2px;
+    }
+
+    ::selection {
+        background: hsl(var(--primary) / 0.3);
+        color: hsl(var(--foreground));
     }
 
     * {

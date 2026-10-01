@@ -1,0 +1,71 @@
+/*
+ * THE DIRECTOR — design tokens ("midnight noir")
+ *
+ * REFERENCE SPEC — this file is not imported. The live copy of these values is
+ * the `:root` block in resources/css/app.css (@layer base), which was updated
+ * in place to match. Change both together. tailwind.config.js wraps each var
+ * as `hsl(var(--x) / <alpha-value>)` so opacity modifiers (bg-card/60) work.
+ *
+ * Values are bare HSL triplets so Tailwind can wrap them as
+ * `hsl(var(--token) / <alpha-value>)`. Each maps to a Tailwind palette step,
+ * noted alongside, so tokens and raw slate-* classes stay visually identical.
+ *
+ * Contrast on --background (slate-950): slate-400 7.9:1 · slate-500 4.2:1 (fails
+ * AA for small text) · slate-600 2.7:1 · slate-700 1.95:1. --muted-foreground
+ * (slate-400) is therefore the floor for any secondary text.
+ */
+
+:root {
+    color-scheme: dark;
+
+    /* ── Surfaces ─────────────────────────────────────────────── */
+    --background: 228.6 84% 4.9%;            /* slate-950 #020617 */
+    --foreground: 210 40% 98%;               /* slate-50  #f8fafc */
+    --card: 222.2 47.4% 11.2%;               /* slate-900 #0f172a */
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 47.4% 11.2%;            /* slate-900 */
+    --popover-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;              /* slate-800 #1e293b */
+    --muted-foreground: 215 20.2% 65.1%;     /* slate-400 #94a3b8 — secondary-text floor */
+    --secondary: 217.2 32.6% 17.5%;          /* slate-800 */
+    --secondary-foreground: 210 40% 98%;
+    --accent: 217.2 32.6% 17.5%;             /* slate-800 (hover fills) */
+    --accent-foreground: 210 40% 98%;
+
+    /* ── Brand / intent ───────────────────────────────────────── */
+    --primary: 187.9 85.7% 53.3%;            /* cyan-400 #22d3ee */
+    --primary-foreground: 228.6 84% 4.9%;    /* slate-950 */
+    --destructive: 0 84.2% 60.2%;            /* red-500 #ef4444 */
+    --destructive-foreground: 210 40% 98%;
+    --success: 160.1 84.1% 39.4%;            /* emerald-500 #10b981 */
+    --success-foreground: 210 40% 98%;
+    --warning: 37.7 92.1% 50.2%;             /* amber-500 #f59e0b */
+    --warning-foreground: 228.6 84% 4.9%;
+
+    /* ── Lines & focus ────────────────────────────────────────── */
+    --border: 217.2 32.6% 17.5%;             /* slate-800 */
+    --input: 215.3 25% 26.7%;                /* slate-700 #334155 */
+    --ring: 187.9 85.7% 53.3%;               /* cyan-400 (was orange) */
+    --radius: 0.75rem;
+
+    /* ── Game tokens ──────────────────────────────────────────── */
+    --cash-clean: 158.1 64.4% 51.6%;         /* emerald-400 #34d399 — clean cash */
+    --cash-dirty: 0 90.6% 70.8%;             /* red-400 #f87171 — dirty cash */
+    --gold: 45.9 96.7% 64.5%;                /* amber-300 #fcd34d — gold tier / premium */
+
+    /* ── Layout metrics (shared by layout + fixed UI) ─────────── */
+    --header-h: 3rem;                        /* GameLayout header h-12 */
+    --bottom-bar-h: 3.5rem;                  /* mobile tab bar h-14 */
+}
+
+/* Keyboard focus fallback for anything not yet on the UI kit (kit components
+   set their own ring). Mouse/touch clicks never show it. */
+:where(a, button, [role="button"], [role="tab"], input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+}
+
+::selection {
+    background: hsl(var(--primary) / 0.3);
+    color: hsl(var(--foreground));
+}
