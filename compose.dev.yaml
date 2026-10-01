@@ -1,5 +1,5 @@
 # Local development stack: docker compose -f compose.dev.yaml up
-# See docker/dev/README.md for first-time setup (Neon branch + .env).
+# Uses your existing .env (Neon database, Google OAuth); only Redis is containerised.
 services:
   app:
     build:
@@ -12,7 +12,6 @@ services:
     env_file: .env
     environment:
       APP_ENV: local
-      APP_URL: http://localhost:8000
       REDIS_HOST: redis
     depends_on:
       - redis
