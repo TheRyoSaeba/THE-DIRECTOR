@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Support\UserSessions;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -44,12 +45,16 @@ class DevLoginController extends Controller
             return back()->withErrors(['email' => 'Invalid credentials.']);
         }
 
+        $now = now();
         DB::table('users')->where('id', $user->id)->update([
-            'last_login_at' => now(),
+            'last_login_at' => $now,
         ]);
+        $user->forceFill(['last_login_at' => $now])->syncOriginalAttribute('last_login_at');
+        UserSessions::purgeDatabaseSessions($user->id, session()->getId());
 
         Auth::login($user);
         $request->session()->regenerate();
+        UserSessions::started($request, $user);
 
         return redirect()->route('dashboard');
     }

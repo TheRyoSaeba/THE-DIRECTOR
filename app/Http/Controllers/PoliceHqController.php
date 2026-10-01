@@ -69,17 +69,9 @@ class PoliceHqController extends CityController
             $careerRanks = CareerRank::getRanksForCareer($policeCareerId)
                 ->keyBy('rank_level');
 
-            // One sessions lookup for the whole roster (same semantics as Character::isOnline()).
+            // One presence lookup for the whole roster (same semantics as Character::isOnline()).
             $officerUserIds = $officers->pluck('user_id')->filter()->unique()->values()->all();
-            $onlineUserIds = $officerUserIds
-                ? DB::table('sessions')
-                    ->whereIn('user_id', $officerUserIds)
-                    ->whereNotNull('user_id')
-                    ->distinct()
-                    ->pluck('user_id')
-                    ->flip()
-                    ->all()
-                : [];
+            $onlineUserIds = \App\Support\Presence::onlineAmong($officerUserIds);
 
             $roster = $officers->map(function ($c) use ($careerRanks, $onlineUserIds) {
                 $rank = $careerRanks->get($c->career_rank);

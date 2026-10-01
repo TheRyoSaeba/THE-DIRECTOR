@@ -558,15 +558,12 @@ class Character extends Model
 
     public function scopeOnline(Builder $query): Builder
     {
-
-
-
-        return $query->whereExists(function ($q) {
-            $q->select(DB::raw(1))
-                ->from('sessions')
-                ->whereColumn('sessions.user_id', 'characters.user_id')
-                ->whereNotNull('sessions.user_id');
-        });
+        // Online = presence heartbeat within the 45-min window (Redis ZSET),
+        // not "has a sessions row". Integer ids are inlined (no bind limit).
+        return $query->whereIntegerInRaw(
+            'characters.user_id',
+            array_keys(\App\Support\Presence::onlineUserIds()),
+        );
     }
 
     public function scopeOnlineInCity(Builder $query, int $cityId): Builder
@@ -588,7 +585,11 @@ class Character extends Model
 
         $recentDeathCutoff = now()->subMinutes(35);
 
-        $globalQuery = DB::table('characters')
+        // Online users + last-seen from the presence ZSET (most recent first).
+        // A few extra ids cover users without a (joinable) character row.
+        $presence = \App\Support\Presence::onlineUserIds(null, 150);
+
+        $globalResults = DB::table('characters')
             ->select([
                 'characters.id',
                 'characters.display_name',
@@ -612,52 +613,33 @@ class Character extends Model
                 'parent_trusts.image_url as corporation_parent_trust_image_url',
                 'character_timers.jail_until',
                 'character_timers.hospital_until',
-                DB::raw('COALESCE(MAX(sessions.last_activity), FLOOR(EXTRACT(EPOCH FROM characters.deleted_at))) as last_activity'),
+                DB::raw('FLOOR(EXTRACT(EPOCH FROM characters.deleted_at)) as deleted_at_epoch'),
             ])
-            ->leftJoin('sessions', function ($join) {
-                $join->on('characters.user_id', '=', 'sessions.user_id')
-                    ->whereNotNull('sessions.user_id');
-            })
             ->join('careers', 'characters.career_id', '=', 'careers.id')
             ->join('cities as home_cities', 'characters.home_city_id', '=', 'home_cities.id')
             ->leftJoin('corporations', 'characters.corporation_id', '=', 'corporations.id')
             ->leftJoin('corporations as parent_trusts', 'corporations.parent_trust_id', '=', 'parent_trusts.id')
             ->leftJoin('character_timers', 'characters.id', '=', 'character_timers.character_id')
-            ->where(function ($query) use ($recentDeathCutoff) {
-                $query->whereNotNull('sessions.user_id')
+            ->where(function ($query) use ($recentDeathCutoff, $presence) {
+                // Same rule as before: every character of an online user
+                // (DB::table → includes soft-deleted ones), or a recent death.
+                $query->whereIntegerInRaw('characters.user_id', array_keys($presence))
                     ->orWhere(function ($query) use ($recentDeathCutoff) {
                         $query->whereNotNull('characters.deleted_at')
                             ->where('characters.deleted_at', '>=', $recentDeathCutoff);
                     });
             })
-            ->groupBy([
-                'characters.id',
-                'characters.display_name',
-                'characters.custom_avatar_url',
-                'characters.glow_color',
-                'characters.career_id',
-                'characters.career_rank',
-                'characters.corporation_position',
-                'characters.user_id',
-                'characters.city_id',
-                'characters.deleted_at',
-                'careers.name',
-                'home_cities.name',
-                'corporations.name',
-                'corporations.image_url',
-                'corporations.ceo_id',
-                'corporations.founder_id',
-                'corporations.is_holding_company',
-                'corporations.parent_trust_id',
-                'parent_trusts.name',
-                'parent_trusts.image_url',
-                'character_timers.jail_until',
-                'character_timers.hospital_until',
-            ])
-            ->orderBy('last_activity', 'desc')
-            ->limit(100);
-
-        $globalResults = $globalQuery->get();
+            ->get()
+            ->each(function ($row) use ($presence) {
+                // Previously COALESCE(MAX(sessions.last_activity), deleted_at epoch).
+                $row->last_activity = $presence[(int) $row->user_id] ?? (
+                    $row->deleted_at_epoch !== null ? (int) $row->deleted_at_epoch : null
+                );
+                unset($row->deleted_at_epoch);
+            })
+            ->sortByDesc('last_activity')
+            ->take(100)
+            ->values();
 
         $careerIds = $globalResults->pluck("career_id")->unique()->toArray();
         $rankLevels = $globalResults->pluck("career_rank")->unique()->toArray();
@@ -750,12 +732,7 @@ class Character extends Model
 
     public function isOnline(): bool
     {
-
-
-        return DB::table('sessions')
-            ->where('user_id', $this->user_id)
-            ->whereNotNull('user_id')
-            ->exists();
+        return $this->user_id !== null && \App\Support\Presence::isOnline((int) $this->user_id);
     }
 
     public function isAdmin(): bool
@@ -840,11 +817,15 @@ class Character extends Model
             ];
         }
 
-        if (!$target->isOnline()) {
-            $lastLogin = $target->user?->last_login_at;
-            $inactiveForTwoWeeks = $lastLogin && $lastLogin->lte(now()->subWeeks(2));
+        $targetLastSeen = $target->user_id !== null ? \App\Support\Presence::lastSeen((int) $target->user_id) : null;
+        if (!\App\Support\Presence::scoreIsOnline($targetLastSeen)) {
+            // "Last seen at logout": last_login_at (stamped at logout / forced
+            // or idle auto-logout), or when the 45-min presence window ran out
+            // if the auto-logout job hasn't stamped it yet.
+            $offlineAt = \App\Support\Presence::wentOfflineAt($targetLastSeen, $target->user?->last_login_at);
+            $inactiveForTwoWeeks = $offlineAt !== null && $offlineAt <= now()->subWeeks(2)->getTimestamp();
 
-            if (!$inactiveForTwoWeeks && (!$lastLogin || $lastLogin->lt(now()->subMinutes(35)))) {
+            if (!$inactiveForTwoWeeks && ($offlineAt === null || $offlineAt < now()->subMinutes(35)->getTimestamp())) {
                 return [
                     "valid" => false,
                     "error" => "Target has not been online recently",

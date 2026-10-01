@@ -4,11 +4,12 @@ namespace App\Http\Middleware;
 
 use App\Models\BannedUser;
 use App\Services\UserService;
+use App\Support\Presence;
+use App\Support\UserSessions;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cookie;
-use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
 
 class CheckPlayerState
@@ -98,21 +99,25 @@ class CheckPlayerState
 
         
         if ($user->last_login_at && now()->subHours(4)->greaterThan($user->last_login_at)) {
+            // Bumping last_login_at ends this user's other sessions too (see
+            // UserSessions: last_login_at is the per-user session epoch).
             $user->last_login_at = now();
             $user->save();
 
-            DB::transaction(function () use ($user) {
-                DB::table('sessions')
-                    ->where('user_id', '=', $user->id)
-                    ->where('id', '!=', session()->getId())
-                    ->delete();
-            });
+            Presence::forget($user->id);
+            UserSessions::purgeDatabaseSessions($user->id, session()->getId());
 
             Auth::logout();
             $request->session()->invalidate();
             $request->session()->regenerateToken();
         
             return redirect()->route('login')->with('error', 'Your session has expired after 4 hours. Please log in again.');
+        }
+
+        // Superseded by a newer login/logout, idle > 45 min, or globally
+        // revoked → log out; otherwise write the (throttled) presence heartbeat.
+        if ($ended = UserSessions::enforce($request, $user)) {
+            return $ended;
         }
 
         

@@ -165,18 +165,18 @@ class ProfileController extends Controller
     //! TODO Misleadingly shows last active time not when they were kicked off. sometimes says unknown for it maybe cron.
     private function showProfile(Character $character, bool $isOwnProfile, ?string $viewerCitySlug = null)
     {
-        $isOnline = $character->isOnline();
+        // One presence lookup answers both "online?" and "last seen".
+        $lastSeen = $character->user_id ? \App\Support\Presence::lastSeen((int) $character->user_id) : null;
+        $isOnline = \App\Support\Presence::scoreIsOnline($lastSeen);
         $lastActivity = null;
 
         if (!$isOnline && $character->user) {
-            $lastSession = DB::table('sessions')
-                ->where('user_id', '=', $character->user_id, 'and')
-                ->orderByDesc('last_activity')
-                ->first();
-
-            $lastActivity = $lastSession ? (is_object($lastSession) && property_exists($lastSession, 'last_activity') ? $lastSession->last_activity :
-                (is_array($lastSession) && isset($lastSession['last_activity']) ? $lastSession['last_activity'] : null)) :
-                ($character->user?->last_login_at?->timestamp ?? null);
+            // Latest of: last heartbeat, or last_login_at (stamped at login,
+            // logout and the idle/forced auto-logouts).
+            $lastLogin = $character->user->last_login_at?->timestamp;
+            $lastActivity = ($lastSeen !== null || $lastLogin !== null)
+                ? max($lastSeen ?? 0, $lastLogin ?? 0)
+                : null;
         }
 
 

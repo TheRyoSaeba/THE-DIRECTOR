@@ -21,7 +21,17 @@ Schedule::call(function () {
 
 
 Schedule::call(function () {
+    // Presence (Redis) replaces the sessions table as the online/last-seen source.
+    // Users idle past the 45-minute window get last_login_at stamped (their
+    // "went offline" time, and the session epoch, so idle sessions end) and are
+    // dropped from the presence set. Works with either session driver.
+    \App\Support\Presence::expireIdle(function (array $ids) {
+        foreach (array_chunk($ids, 1000) as $chunk) {
+            DB::table('users')->whereIn('id', $chunk)->update(['last_login_at' => now()]);
+        }
+    });
 
+    // SESSION_DRIVER=database only (no-op once sessions live in Redis).
     DB::statement("
         UPDATE users
         SET last_login_at = NOW()

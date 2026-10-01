@@ -4,10 +4,11 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Support\Presence;
+use App\Support\UserSessions;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -90,12 +91,10 @@ class LoginController extends Controller
 
 
 
-        DB::transaction(function () use ($user) {
-            DB::table('sessions')
-                ->where('user_id', '=', $user->id)
-                ->where('id', '!=', session()->getId())
-                ->delete();
-        });
+        // The last_login_at bump above is the per-user session epoch: every
+        // other session of this user ends on its next request (UserSessions).
+        // Database driver only: also drop the legacy rows right away.
+        UserSessions::purgeDatabaseSessions($user->id, session()->getId());
 
         if ($isNewUser) {
             return redirect()->route('login')->with('success', 'Registration successful! Please sign in with Google now to enter.');
@@ -105,6 +104,7 @@ class LoginController extends Controller
 
         Auth::login($user);
         $request->session()->regenerate();
+        UserSessions::started($request, $user);
 
         return redirect()->route('dashboard');
     }
@@ -125,9 +125,10 @@ class LoginController extends Controller
         $request->session()->regenerateToken();
 
         if ($userId) {
-            DB::table('sessions')
-                ->where('user_id', $userId)
-                ->delete();
+            // last_login_at was bumped above → all of this user's other
+            // sessions end too (as the old DELETE did); show offline now.
+            Presence::forget($userId);
+            UserSessions::purgeDatabaseSessions($userId);
         }
 
         return redirect()->route('login')->with('success', 'You have been logged out');

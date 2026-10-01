@@ -48,12 +48,7 @@ class Mugging extends CityEvent
             ->leftJoin('character_timers', 'characters.id', '=', 'character_timers.character_id')
             
             
-            ->whereExists(function ($q) {
-                $q->select(DB::raw(1))
-                  ->from('sessions')
-                  ->whereColumn('sessions.user_id', 'characters.user_id')
-                  ->whereNotNull('sessions.user_id');
-            })
+            ->whereIntegerInRaw('characters.user_id', array_keys(\App\Support\Presence::onlineUserIds()))
             ->where('characters.city_id', $currentCity->id)
             ->whereNull('characters.deleted_at')
             ->where(function ($q) use ($now) {

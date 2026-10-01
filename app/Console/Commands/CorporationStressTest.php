@@ -700,6 +700,7 @@ class CorporationStressTest extends Command
                     'last_activity' => now()->getTimestamp(),
                 ],
             );
+            \App\Support\Presence::touch($char->user_id, '127.0.0.1');
             $char->refresh();
         }
     }

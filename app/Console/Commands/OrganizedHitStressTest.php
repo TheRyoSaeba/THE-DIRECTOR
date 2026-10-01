@@ -678,6 +678,7 @@ class OrganizedHitStressTest extends Command
                 'payload'       => '',
                 'last_activity' => time(),
             ]);
+            \App\Support\Presence::touch($user->id, '127.0.0.1');
         }
 
         $char = Character::create([

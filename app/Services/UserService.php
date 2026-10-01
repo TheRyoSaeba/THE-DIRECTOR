@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\User;
+use App\Support\UserSessions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -36,14 +37,11 @@ class UserService
             \App\Models\BannedUser::banIdentifier('ip', $user->last_ip, "Banned user: {$user->username}", $bannedBy, $until, $user->id);
         }
 
-        // Ban every IP this user has held a session from, so a temp/perma ban
-        // also blocks their known connections. Each row is tagged with the
-        // user_id so unban can clear exactly these.
-        $sessionIps = DB::table('sessions')
-            ->where('user_id', $user->id)
-            ->whereNotNull('ip_address')
-            ->distinct()
-            ->pluck('ip_address');
+        // Ban every IP this user has recently been seen from (presence IP
+        // history, 30 days; plus live session rows under the database driver),
+        // so a temp/perma ban also blocks their known connections. Each row is
+        // tagged with the user_id so unban can clear exactly these.
+        $sessionIps = UserSessions::knownIps($user->id);
 
         foreach ($sessionIps as $ip) {
             \App\Models\BannedUser::banIdentifier('ip', $ip, "Banned user: {$user->username}", $bannedBy, $until, $user->id);
@@ -56,9 +54,7 @@ class UserService
 
     private function clearUserSessions(User $user): void
     {
-        DB::table('sessions')
-            ->where('user_id', $user->id)
-            ->delete();
+        UserSessions::logoutEverywhere($user);
     }
 
     private function logBanAction(User $user, ?string $reason): void
