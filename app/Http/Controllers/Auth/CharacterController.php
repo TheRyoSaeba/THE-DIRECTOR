@@ -14,12 +14,78 @@ use Inertia\Inertia;
 
 class CharacterController extends Controller
 {
+    /**
+     * The careers a new character can start in, in display order, with their
+     * starting stats and starting degree (null = none). Single source of truth
+     * for store() (initializeStartingValues / startingDegreesFor) and for the
+     * numbers shown on the character-creation page.
+     */
+    public const STARTER_CAREERS = [
+        'customs' => [
+            'stats' => ['influence' => 25, 'intelligence' => 8, 'offense' => 6, 'defense' => 3, 'luck' => 3],
+            'degree' => null,
+        ],
+        'corporation' => [
+            'stats' => ['influence' => 25, 'intelligence' => 7, 'offense' => 5, 'defense' => 5, 'luck' => 3],
+            'degree' => 'business',
+        ],
+        'technician' => [
+            'stats' => ['influence' => 25, 'intelligence' => 4, 'offense' => 4, 'defense' => 6, 'luck' => 6],
+            'degree' => 'engineering',
+        ],
+    ];
+
+    /** Fallback for a career code missing from STARTER_CAREERS. */
+    private const DEFAULT_STARTING_STATS = ['influence' => 25, 'intelligence' => 5, 'offense' => 5, 'defense' => 5, 'luck' => 5];
+
+    private const DEGREE_LABELS = [
+        'business' => 'Business Degree',
+        'engineering' => 'Engineering Degree',
+    ];
+
     public function create()
     {
+        $codes = array_keys(self::STARTER_CAREERS);
+
+        $careers = Career::whereIn('code', $codes)->get(['id', 'name', 'code', 'description']);
+
+        $rankOne = \App\Models\CareerRank::whereIn('career_id', $careers->pluck('id'))
+            ->where('rank_level', 1)
+            ->get(['career_id', 'rank_name', 'avatar_url'])
+            ->keyBy('career_id');
+
         return Inertia::render('CharacterCreate', [
-            'cities' => City::all(['id', 'name', 'description', 'image_url']),
-            'careers' => Career::whereIn('code', ['customs', 'corporation', 'technician'])
-                ->get(['id', 'name', 'code', 'description']),
+            // select * then map: description / image_url are not in every schema
+            // (absent from the migrations), so naming them in the SELECT can 500.
+            'cities' => City::orderBy('id')->get()->map(fn (City $city) => [
+                'id' => $city->id,
+                'name' => $city->name,
+                'description' => $city->description,
+                'image_url' => $city->image_url,
+            ])->values(),
+            'careers' => $careers
+                ->sortBy(fn (Career $career) => array_search($career->code, $codes, true))
+                ->map(function (Career $career) use ($rankOne) {
+                    $profile = self::STARTER_CAREERS[$career->code];
+                    $degree = $profile['degree'];
+                    $rank = $rankOne->get($career->id);
+
+                    return [
+                        'id' => $career->id,
+                        'name' => $career->name,
+                        'code' => $career->code,
+                        'description' => $career->description,
+                        'rank_name' => $rank?->rank_name,
+                        'avatar_url' => $rank?->avatar_url,
+                        'stats' => $profile['stats'],
+                        'perk' => $degree ? [
+                            'code' => $degree,
+                            'label' => self::DEGREE_LABELS[$degree] ?? ucfirst($degree) . ' Degree',
+                            'cycles' => (int) config("timers.degree_cycles.{$degree}", 0),
+                        ] : null,
+                    ];
+                })
+                ->values(),
         ]);
     }
 
@@ -61,7 +127,7 @@ class CharacterController extends Controller
                 'required',
                 'integer',
                 Rule::exists('careers', 'id')->where(function ($query) {
-                    $query->whereIn('code', ['customs', 'corporation', 'technician']);
+                    $query->whereIn('code', array_keys(self::STARTER_CAREERS));
                 }),
             ],
         ], [
@@ -119,11 +185,7 @@ class CharacterController extends Controller
 
     private function startingDegreesFor(string $careerCode, int $cityId): ?array
     {
-        $degree = match ($careerCode) {
-            'technician' => 'engineering',
-            'corporation' => 'business',
-            default => null,
-        };
+        $degree = self::STARTER_CAREERS[$careerCode]['degree'] ?? null;
 
         if (!$degree) {
             return null;
@@ -140,36 +202,7 @@ class CharacterController extends Controller
 
     private function initializeStartingValues(Character $character, string $careerCode): void
     {
-        $startingStats = match ($careerCode) {
-            'customs' => [
-                'influence' => 25,
-                'intelligence' => 8,
-                'offense' => 6,
-                'defense' => 3,
-                'luck' => 3,
-            ],
-            'corporation' => [
-                'influence' => 25,
-                'intelligence' => 7,
-                'offense' => 5,
-                'defense' => 5,
-                'luck' => 3,
-            ],
-            'technician' => [
-                'influence' => 25,
-                'intelligence' => 4,
-                'offense' => 4,
-                'defense' => 6,
-                'luck' => 6,
-            ],
-            default => [
-                'influence' => 25,
-                'intelligence' => 5,
-                'offense' => 5,
-                'defense' => 5,
-                'luck' => 5,
-            ]
-        };
+        $startingStats = self::STARTER_CAREERS[$careerCode]['stats'] ?? self::DEFAULT_STARTING_STATS;
 
         $character->stats()->create([
             'character_id' => $character->id,
