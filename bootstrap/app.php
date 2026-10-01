@@ -24,6 +24,12 @@ return Application::configure(basePath: dirname(__DIR__))
         
         $middleware->trustProxies(at: '*');
 
+        // `throttle:*` -> ThrottleRequestsWithRedis: one Lua EVAL per limit
+        // (DurationLimiter) on the default Redis connection instead of the
+        // cache-store limiter's several GET/ADD/INCR round trips. The named
+        // limiters in AppServiceProvider (guest/players/actions) are unchanged.
+        $middleware->throttleWithRedis();
+
         $middleware->alias([   
             'city.access' => \App\Http\Middleware\CityCheck::class,
             'career'      => \App\Http\Middleware\EnsureCharacterCareer::class,

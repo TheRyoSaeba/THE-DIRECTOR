@@ -45,6 +45,38 @@ class City extends Model
         return 'slug';
     }
 
+    /**
+     * Resolve a {city} route slug (used by the Route::bind('city') binder and
+     * CityCheck). Nearly every /{city} request is for the city the player is
+     * standing in, which getLoadedCharacter() has just read from the database
+     * in this same request, so that row is reused instead of running another
+     * `select * from cities where slug = ?`. Always a NEW model instance built
+     * from the raw database values (never the character's relation object), so
+     * controllers mutating $city cannot affect $character->city and vice
+     * versa — exactly as with two separate queries. Any other slug falls back
+     * to the same query implicit binding ran. Nothing is cached across
+     * requests: city rows are mutated at runtime by app code and pg_cron.
+     */
+    public static function resolveForRoute(string $slug, ?User $user, bool $caseInsensitive = false): ?self
+    {
+        $character = $user?->getLoadedCharacter();
+        $current = $character?->relationLoaded('city') ? $character->getRelation('city') : null;
+
+        if ($current instanceof self && $current->exists && is_string($current->slug)) {
+            $matches = $caseInsensitive
+                ? strtolower($current->slug) === strtolower($slug)
+                : $current->slug === $slug;
+
+            if ($matches) {
+                return $current->newFromBuilder($current->getRawOriginal(), $current->getConnectionName());
+            }
+        }
+
+        return $caseInsensitive
+            ? static::whereRaw('LOWER(slug) = ?', [strtolower($slug)])->first()
+            : (new static())->resolveRouteBinding($slug);
+    }
+
     public function mayor(): BelongsTo
     {
         return $this->belongsTo(Character::class, 'mayor_id');

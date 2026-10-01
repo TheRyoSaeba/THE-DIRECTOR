@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\CareerRank;
 use App\Models\Character;
 use App\Models\Message;
 use App\Models\Announcement;
@@ -19,7 +20,7 @@ class HandleInertiaRequests extends Middleware
     {
         if ($request->routeIs("logout")) {
             return array_merge(parent::share($request), [
-                "auth" => null,
+                "auth" => Inertia::always(null),
                 "onlinePlayers" => null,
             ]);
         }
@@ -29,14 +30,18 @@ class HandleInertiaRequests extends Middleware
 
 
 
+        // `flash` and `auth` are AlwaysProps: they are sent on every response,
+        // including partial reloads, whatever the client's only/except lists
+        // say (PropsResolver lets AlwaysProp bypass both filters, and the
+        // children of a resolved AlwaysProp are never filtered either).
         $flashShare = [
-            "flash" => fn() => [
+            "flash" => Inertia::always(fn() => [
                 "success" => $request->session()->get("success"),
                 "error" => $request->session()->get("error"),
                 "warning" => $request->session()->get("warning"),
                 "conflict_outcome" => $request->session()->get("conflict_outcome"),
                 "blackjack" => $request->session()->get("blackjack"),
-            ],
+            ]),
         ];
 
         if (!$request->isMethod("GET")) {
@@ -44,14 +49,40 @@ class HandleInertiaRequests extends Middleware
         }
 
 
+        // All shared-prop cache keys are known up front, so the first prop
+        // that needs one fetches them all with a single MGET into the
+        // request-scoped memo. This runs while the response is rendered,
+        // i.e. after the controller, so any Cache::forget() the controller
+        // did (new journal entry, message read, ...) is already reflected.
+        $prefetched = false;
+        $prefetch = function () use ($character, &$prefetched): void {
+            if ($prefetched) {
+                return;
+            }
+            $prefetched = true;
+
+            $keys = [Announcement::HAS_ACTIVE_CACHE_KEY];
+            if ($character) {
+                $keys[] = "unread_journals_{$character->id}";
+                $keys[] = "unread_messages_{$character->id}";
+                if ($character->career_id !== null) {
+                    $keys[] = CareerRank::cacheKey((int) $character->career_id);
+                }
+            }
+
+            SafeCache::prefetch($keys);
+        };
+
         $memoizedUnreadJournalCount = null;
-        $unreadJournalCount = function () use ($character, &$memoizedUnreadJournalCount): int {
+        $unreadJournalCount = function () use ($character, &$memoizedUnreadJournalCount, $prefetch): int {
             if ($memoizedUnreadJournalCount !== null) {
                 return $memoizedUnreadJournalCount;
             }
 
+            $prefetch();
+
             return $memoizedUnreadJournalCount = $character
-                ? SafeCache::remember(
+                ? SafeCache::rememberMemo(
                     "unread_journals_{$character->id}",
                     30,
                     fn() => $character
@@ -64,13 +95,15 @@ class HandleInertiaRequests extends Middleware
         };
 
         $memoizedUnreadMessageCount = null;
-        $unreadMessageCount = function () use ($character, &$memoizedUnreadMessageCount): int {
+        $unreadMessageCount = function () use ($character, &$memoizedUnreadMessageCount, $prefetch): int {
             if ($memoizedUnreadMessageCount !== null) {
                 return $memoizedUnreadMessageCount;
             }
 
+            $prefetch();
+
             return $memoizedUnreadMessageCount = $character
-                ? SafeCache::remember(
+                ? SafeCache::rememberMemo(
                     "unread_messages_{$character->id}",
                     10,
                     fn() => Message::where("recipient_id", $character->id)
@@ -83,7 +116,7 @@ class HandleInertiaRequests extends Middleware
 
         return array_merge(parent::share($request), $flashShare, [
             "serverTime" => Inertia::always(fn() => Carbon::now("UTC")->format('Y-m-d\TH:i:s\Z')),
-            "auth" => $user
+            "auth" => Inertia::always($user
                 ? [
                     "user" => [
                         "username" => $user->username,
@@ -101,12 +134,12 @@ class HandleInertiaRequests extends Middleware
                     ),
                     "character" => fn() => $this->getCharacterData(
                         $character,
-                        ($unreadJournalCount)(),
+                        ($unreadJournalCount)(), // triggers the batched prefetch
                         $user,
                         $request,
                     ),
                 ]
-                : null,
+                : null),
             // Once-prop: the client keeps its copy across navigations and
             // sends its key in X-Inertia-Except-Once-Props while it is fresh,
             // so the server skips resolving/serialising the ~45 KB list on

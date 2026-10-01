@@ -41,7 +41,9 @@ class Announcement extends Model
 
     public static function hasActive(): bool
     {
-        return (bool) SafeCache::remember(
+        // Memo-backed so HandleInertiaRequests can batch this key with the
+        // other shared-prop keys into one MGET (SafeCache::prefetch).
+        return (bool) SafeCache::rememberMemo(
             self::HAS_ACTIVE_CACHE_KEY,
             now()->addMinutes(5),
             fn() => self::current()->exists(),

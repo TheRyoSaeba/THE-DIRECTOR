@@ -74,12 +74,15 @@ class CareerRank extends Model
 
     public static function getRanksForCareer(int $careerId)
     {
-        return SafeCache::rememberForever(self::cacheKey($careerId), function () use ($careerId) {
+        // Request-scoped memo: current rank, next rank, avatar and the
+        // promotion check all read this key; it now costs at most one Redis
+        // read per request (zero when HandleInertiaRequests prefetched it).
+        return SafeCache::rememberForeverMemo(self::cacheKey($careerId), function () use ($careerId) {
             return self::where('career_id', $careerId)->get();
         }, collect());
     }
 
-    private static function cacheKey(int $careerId): string
+    public static function cacheKey(int $careerId): string
     {
         return "career_ranks_{$careerId}_v3";
     }

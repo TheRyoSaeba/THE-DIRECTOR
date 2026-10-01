@@ -3,7 +3,6 @@
 namespace App\Http\Middleware;
 
 use App\Models\City;
-use App\Support\SafeCache;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -15,13 +14,12 @@ class CityCheck
     {
         $city = $request->route('city');
 
+        // Route::bind('city') (AppServiceProvider) already turned the slug
+        // into a fresh City for every /{city} route. This branch only runs
+        // for a route without that binding; it resolves the same way (fresh
+        // row, no hour-long cache of mutable city columns).
         if (is_string($city)) {
-            $slug = strtolower($city);
-            $city = SafeCache::remember(
-                "city_by_slug_{$slug}",
-                3600,
-                fn() => City::whereRaw('LOWER(slug) = ?', [$slug])->first()
-            );
+            $city = City::resolveForRoute($city, $request->user(), caseInsensitive: true);
         }
 
         if (!$city) {
