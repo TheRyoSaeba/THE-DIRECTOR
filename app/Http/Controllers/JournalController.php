@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\CharacterJournal;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -32,6 +33,9 @@ class JournalController extends Controller
             ->limit(50)
             ->get()
             ->makeHidden(['character_id']);
+
+        // Resolve actor avatars / city names for all rows in bulk (avoids a query per row).
+        CharacterJournal::preloadForDisplay($entries);
 
         $requests        = $entries->filter(fn($e) => $e->isRequest());
         $savedEntries    = $entries->filter(fn($e) => !$e->isRequest() && $e->is_saved);

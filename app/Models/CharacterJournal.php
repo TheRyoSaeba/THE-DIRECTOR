@@ -27,6 +27,64 @@ class CharacterJournal extends Model
         "item_image",
     ];
 
+    /**
+     * Per-row values injected by preloadForDisplay() so the appended accessors
+     * (actor_avatar, description) don't run one query per journal row.
+     * Not model attributes, so they are never serialized.
+     */
+    protected bool $actorAvatarPreloaded = false;
+    protected ?string $preloadedActorAvatar = null;
+    protected bool $cityNamePreloaded = false;
+    protected ?string $preloadedCityName = null;
+
+    /**
+     * Resolve, in bulk, everything the appended accessors would otherwise look up
+     * per row: actor avatars (one characters query) and city names for
+     * investment_fraud_request descriptions (one cities query).
+     * Output is identical to the per-row fallbacks in the accessors.
+     */
+    public static function preloadForDisplay(iterable $journals): void
+    {
+        $actorIds = [];
+        $cityIds = [];
+        foreach ($journals as $journal) {
+            if ($actorId = $journal->resolveActorId()) {
+                $actorIds[] = $actorId;
+            }
+            if ($journal->type === "investment_fraud_request") {
+                $cityIds[] = $journal->data["city_id"] ?? 1;
+            }
+        }
+
+        $avatars = [];
+        if ($actorIds) {
+            // Same scope as Character::find() (soft-deleted excluded); only the
+            // columns Character::getAvatarUrlAttribute() needs.
+            $avatars = Character::whereIn("id", array_values(array_unique($actorIds)))
+                ->get(["id", "custom_avatar_url", "career_id", "career_rank"])
+                ->mapWithKeys(fn(Character $c) => [$c->id => $c->avatar_url])
+                ->all();
+        }
+
+        $cityNames = [];
+        if ($cityIds) {
+            $cityNames = City::whereIn("id", array_values(array_unique($cityIds)))
+                ->pluck("name", "id")
+                ->all();
+        }
+
+        foreach ($journals as $journal) {
+            $actorId = $journal->resolveActorId();
+            $journal->preloadedActorAvatar = $actorId ? ($avatars[$actorId] ?? null) : null;
+            $journal->actorAvatarPreloaded = true;
+
+            if ($journal->type === "investment_fraud_request") {
+                $journal->preloadedCityName = $cityNames[$journal->data["city_id"] ?? 1] ?? null;
+                $journal->cityNamePreloaded = true;
+            }
+        }
+    }
+
     public function character(): BelongsTo
     {
         return $this->belongsTo(Character::class);
@@ -923,8 +981,12 @@ class CharacterJournal extends Model
 
             case "investment_fraud_request":
                 $corpName = $data["corporation_name"] ?? "The Corporation";
-                $city = \App\Models\City::find($data["city_id"] ?? 1);
-                $cityName = $city ? $city->name : "the city's";
+                if ($this->cityNamePreloaded) {
+                    $cityName = $this->preloadedCityName ?? "the city's";
+                } else {
+                    $city = \App\Models\City::find($data["city_id"] ?? 1);
+                    $cityName = $city ? $city->name : "the city's";
+                }
                 return "Your CEO, {$data['ceo_name']} has initiated a scheme to issue fraudulent commercial paper through {$cityName} bank. They need your help in hatching the plan.";
 
             case "investment_fraud_result":
@@ -1791,11 +1853,9 @@ class CharacterJournal extends Model
         return str_ends_with($this->type, "_request");
     }
 
-    public function getActorAvatarAttribute(): ?string
+    protected function resolveActorId(): mixed
     {
-
-
-        $actorId = match ($this->type) {
+        return match ($this->type) {
             "item_sale_request" => $this->data["seller_id"] ?? null,
             "corporate_medicine_sale_request" => $this->data["seller_id"] ?? null,
             "corporate_mirror_transaction_request" => $this->data["cfo_id"] ?? null,
@@ -1805,6 +1865,15 @@ class CharacterJournal extends Model
             "demoted" => $this->data["actor_id"] ?? null,
             default => null,
         };
+    }
+
+    public function getActorAvatarAttribute(): ?string
+    {
+        if ($this->actorAvatarPreloaded) {
+            return $this->preloadedActorAvatar;
+        }
+
+        $actorId = $this->resolveActorId();
 
         if (!$actorId) {
             return null;

@@ -169,7 +169,7 @@ function DangerInput({ label, error, ...props }) {
 }
 
 export default function Settings() {
-    const { settings, flash, catalogItems, characterItems, citySlug, character_stats, property_condition } = usePage().props;
+    const { settings, flash, characterItems, citySlug, character_stats, property_condition } = usePage().props;
     const [activeTab, setActiveTab] = useState('account');
     const [recordPage, setRecordPage] = useState(0);
     const [cardFlipSaving, setCardFlipSaving] = useState(false);
@@ -734,7 +734,6 @@ export default function Settings() {
                                         when property is destroyed or uninspected.
                                     */}
                                     <Wardrobe
-                                        catalogItems={catalogItems}
                                         characterItems={characterItems}
                                         citySlug={citySlug}
                                         propertyCondition={property_condition}
