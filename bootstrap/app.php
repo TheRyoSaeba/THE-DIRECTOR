@@ -74,6 +74,12 @@ return Application::configure(basePath: dirname(__DIR__))
                 return $response;
             }
 
+            // Local debugging: show Laravel's real error page for server errors
+            // instead of the styled 500 page (production has APP_DEBUG=false).
+            if ($statusCode >= 500 && config('app.debug')) {
+                return $response;
+            }
+
             
             
             if ($request->header('X-Inertia')) {

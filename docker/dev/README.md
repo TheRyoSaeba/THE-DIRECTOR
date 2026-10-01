@@ -49,3 +49,13 @@ client. Otherwise use `/dev-login` (local only) after giving your account a pass
 docker compose -f compose.dev.yaml exec app php artisan tinker --execute \
   "App\Models\User::where('email', 'you@example.com')->update(['password' => bcrypt('dev')]);"
 ```
+
+## Troubleshooting
+
+- **"This page isn't working" on localhost:8000**: the app container isn't serving yet or has
+  stopped. Check its log: `docker compose -f compose.dev.yaml logs app`. The first start runs
+  `composer install`, which takes a few minutes; wait for `App ready on http://localhost:8000`.
+- **A Laravel error page**: with `APP_DEBUG=true` server errors show the real exception. The full
+  log is in `storage/logs/laravel.log`.
+- **After pulling dependency changes**: `docker compose -f compose.dev.yaml down`, then `up` again.
+  If PHP packages still look stale, delete `vendor/` and start again.
