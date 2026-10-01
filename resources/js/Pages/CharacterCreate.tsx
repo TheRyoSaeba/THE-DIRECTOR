@@ -135,15 +135,11 @@ const STAT_ROWS: Array<{ key: keyof StartingStats; short: string; long: string }
 ];
 const STAT_MAX = 10;
 
-/** The server description is a secondary line; skip it when it is just the career name. */
-function descriptionOf(career: Career): string | null {
-    const d = career.description?.trim();
-    if (!d || d.toLowerCase() === career.name.toLowerCase()) return null;
-    return d;
-}
+/** The single line of flavour text shown for a career (curated; server descriptions vary). */
+const flavourOf = (career: Career) => themeFor(career.code).tagline;
 
 function srSummary(career: Career): string {
-    const parts: string[] = [themeFor(career.code).tagline];
+    const parts: string[] = [flavourOf(career)];
     if (career.rank_name) parts.push(`Starts as ${career.rank_name}.`);
     if (career.stats) parts.push(STAT_ROWS.map((s) => `${s.long} ${career.stats![s.key]}`).join(', ') + '.');
     if (career.perk) parts.push(`Starting perk: ${career.perk.label}.`);
@@ -619,21 +615,21 @@ function DesktopSplit({ careers, cities, form, selected, choose, back }: SharedP
                                         stage === 'form' && 'group-focus-visible:ring-0',
                                     )}
                                 >
-                                    <div className={cn(textLabel, 'flex items-center gap-2')} style={{ color: `rgb(${theme.rgb})` }}>
-                                        <span className="tabular-nums">{String(i + 1).padStart(2, '0')}</span>
-                                        <span aria-hidden className="h-px w-6" style={{ background: `rgba(${theme.rgb}, 0.6)` }} />
-                                        <span>Career path</span>
-                                    </div>
                                     <div
                                         className={cn(
-                                            'mt-2 origin-bottom-left transition-transform duration-[450ms] ease-out motion-reduce:transition-none',
+                                            'origin-bottom-left transition-transform duration-[450ms] ease-out motion-reduce:transition-none',
                                             isActive ? 'scale-110' : 'scale-100',
                                         )}
                                     >
                                         <div className="text-4xl font-black uppercase italic leading-none tracking-tight text-white">{career.name}</div>
                                     </div>
-                                    <p className={cn('mt-3 text-sm leading-snug text-slate-200 transition-[margin] duration-[450ms]', isActive && 'mt-5')}>
-                                        {theme.tagline}
+                                    <p
+                                        className={cn(
+                                            'mt-4 text-sm leading-snug text-slate-200 transition-opacity duration-300',
+                                            isActive || (stage === 'form' && isSel) ? 'opacity-100' : 'opacity-0',
+                                        )}
+                                    >
+                                        {flavourOf(career)}
                                     </p>
 
                                     <div
@@ -642,28 +638,19 @@ function DesktopSplit({ careers, cities, form, selected, choose, back }: SharedP
                                             stage === 'form' ? 'grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100',
                                         )}
                                     >
-                                        <div className="overflow-hidden">
-                                            <p
-                                                className={cn(
-                                                    'mt-2 line-clamp-2 h-8 text-xs leading-4 text-slate-400 transition-opacity duration-300',
-                                                    isActive ? 'opacity-100' : 'opacity-0',
-                                                )}
-                                            >
-                                                {descriptionOf(career)}
-                                            </p>
-                                            <StatGrid career={career} className="mt-3" />
+                                        <div
+                                            className={cn(
+                                                'overflow-hidden transition-opacity duration-300 motion-reduce:transition-none',
+                                                isActive ? 'opacity-100' : 'opacity-0',
+                                            )}
+                                        >
+                                            <StatGrid career={career} className="mt-4" />
                                             <div className="mt-4 flex h-5 items-center">
                                                 <PerkBadge career={career} />
                                             </div>
-                                            <p className="mt-2 h-4 truncate text-xs leading-4 text-slate-400">
-                                                {career.rank_name ? `Starts as ${career.rank_name}` : ''}
-                                            </p>
                                         </div>
                                     </div>
 
-                                    {stage === 'form' && isSel && career.rank_name && (
-                                        <p className="mt-3 text-xs text-slate-400">Starts as {career.rank_name}</p>
-                                    )}
                                 </div>
                             </div>
 
@@ -691,18 +678,6 @@ function DesktopSplit({ careers, cities, form, selected, choose, back }: SharedP
                         </div>
                     );
                 })}
-            </div>
-
-            {/* Bottom hint (split only) */}
-            <div
-                className={cn(
-                    'pointer-events-none absolute inset-x-0 bottom-0 z-20 flex items-center justify-center gap-6 pb-5 transition-opacity duration-300',
-                    stage === 'split' ? 'opacity-100' : 'opacity-0',
-                )}
-            >
-                <span className={cn(textLabel, 'rounded-full border border-slate-800 bg-slate-950/80 px-4 py-2 text-slate-400 backdrop-blur')}>
-                    Hover to preview · Click or Enter to choose · ← → to browse
-                </span>
             </div>
 
             {/* Step 2: the form, sliding in over the right of the chosen panel */}
@@ -797,7 +772,7 @@ function MobileStack({ careers, cities, form, selected, choose }: SharedProps) {
                                     )}
                                 </div>
                                 <div className="mt-1.5 text-3xl font-black uppercase italic leading-none tracking-tight text-white">{career.name}</div>
-                                <p className={cn('mt-2 text-sm leading-snug text-slate-200', selected && !isSel && 'truncate opacity-0')}>{theme.tagline}</p>
+                                {isSel && <p className="mt-2 text-sm leading-snug text-slate-200">{flavourOf(career)}</p>}
 
                                 <AnimatePresence initial={false}>
                                     {isSel && (
@@ -808,11 +783,9 @@ function MobileStack({ careers, cities, form, selected, choose }: SharedProps) {
                                             exit={{ opacity: 0, transition: { duration: 0.12 } }}
                                             className="pb-1 pt-4"
                                         >
-                                            {descriptionOf(career) && <p className="mb-3 line-clamp-2 text-xs text-slate-400">{descriptionOf(career)}</p>}
                                             <StatGrid career={career} />
                                             <div className="mt-4 flex flex-wrap items-center gap-2">
                                                 <PerkBadge career={career} />
-                                                {career.rank_name && <span className="text-xs text-slate-400">Starts as {career.rank_name}</span>}
                                             </div>
                                         </motion.div>
                                     )}
@@ -926,7 +899,7 @@ function FormPanel({
             You&rsquo;ll appear as <span className="font-bold text-white">{cleaned}</span>
         </>
     ) : (
-        '3–15 characters. Letters, numbers and spaces.'
+        'Letters, numbers and spaces.'
     );
 
     const overlay = variant === 'overlay';
@@ -1025,12 +998,6 @@ function FormPanel({
                     <Button type="submit" size="lg" fullWidth loading={processing} iconRight={ArrowRight} className="h-14 text-sm">
                         Begin
                     </Button>
-                    {career && (
-                        <p className="mt-3 text-center text-xs text-slate-400">
-                            Starting as {career.rank_name ?? career.name}
-                            {city ? ` in ${city.name}` : ''}.
-                        </p>
-                    )}
                 </div>
             </form>
         </div>
@@ -1052,7 +1019,6 @@ function CareerSummary({ career }: { career: Career }) {
                     <theme.icon size={22} weight="bold" />
                 </div>
                 <div className="min-w-0 flex-1">
-                    <p className={cn(textLabel, 'text-slate-400')}>Career path</p>
                     <p className="truncate text-xl font-black uppercase italic leading-tight tracking-tight text-white">{career.name}</p>
                 </div>
             </div>
@@ -1061,22 +1027,6 @@ function CareerSummary({ career }: { career: Career }) {
                     <PerkBadge career={career} />
                     {career.rank_name && <span className="text-xs text-slate-400">Starts as {career.rank_name}</span>}
                 </div>
-            )}
-            {career.stats && (
-                <dl className="mt-4 grid grid-cols-4 gap-2">
-                    {STAT_ROWS.map((s) => (
-                        <div key={s.key} className="rounded-lg bg-slate-950/60 px-2 py-1.5 text-center">
-                            <dt className={cn(textLabel, 'text-slate-400')}>
-                                <abbr title={s.long} className="no-underline">
-                                    {s.short}
-                                </abbr>
-                            </dt>
-                            <dd className="text-lg font-black tabular-nums leading-tight" style={{ color: `rgb(${theme.rgb})` }}>
-                                {career.stats![s.key]}
-                            </dd>
-                        </div>
-                    ))}
-                </dl>
             )}
         </div>
     );
@@ -1199,11 +1149,7 @@ function CityPicker({
                 <p id={errorId} className="mt-1.5 text-xs text-red-400">
                     {error}
                 </p>
-            ) : selected?.description ? (
-                <p className="mt-1.5 text-xs text-slate-400">{selected.description}</p>
-            ) : (
-                <p className="mt-1.5 text-xs text-slate-400">Your home city. You can travel to the others later.</p>
-            )}
+            ) : null}
         </fieldset>
     );
 }
