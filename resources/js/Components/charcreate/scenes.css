@@ -1,0 +1,174 @@
+/*
+ * Career-scene motion (CareerScene.tsx). Only transform, opacity and
+ * stroke-dashoffset are animated. [data-mode=a] = slow ambient loop,
+ * [data-mode=f] = the full story. [data-paused] freezes offscreen / hidden
+ * scenes. Reduced motion drops every animation: the SVG markup itself is the
+ * composed static frame.
+ */
+.cc-scene svg * { transform-box: view-box; }
+.cc-scene[data-paused] * { animation-play-state: paused !important; }
+@media (prefers-reduced-motion: reduce) {
+    .cc-scene * { animation: none !important; }
+}
+
+@keyframes cc-spin { to { transform: rotate(360deg); } }
+@keyframes cc-blink { 50% { opacity: .2; } }
+@keyframes cc-dash16 { to { stroke-dashoffset: -16; } }
+@keyframes cc-dash100 { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+
+/* ── Customs ─────────────────────────────────────────────────────────────── */
+@keyframes cc-cu-drift { to { transform: translateY(12px); } }
+@keyframes cc-cu-amb { from { transform: translateX(-52px); } to { transform: translateX(52px); } }
+/* 8 s pass: scan 0.4–2.4 s, stamp 2.6–3.6 s, reveal reset 5.6 s (box offscreen) */
+@keyframes cc-cu-beam {
+    0%, 2.5% { opacity: 0; transform: translateX(-58px); }
+    5% { opacity: 1; transform: translateX(-58px); animation-timing-function: cubic-bezier(.45, 0, .55, 1); }
+    30% { opacity: 1; transform: translateX(58px); }
+    33%, 100% { opacity: 0; transform: translateX(58px); }
+}
+@keyframes cc-cu-rev {
+    0%, 5% { transform: scaleX(0); animation-timing-function: cubic-bezier(.45, 0, .55, 1); }
+    30%, 70% { transform: scaleX(1); }
+    70.2%, 100% { transform: scaleX(0); }
+}
+@keyframes cc-cu-stamp {
+    0%, 32.5% { transform: translateY(0); animation-timing-function: cubic-bezier(.6, 0, 1, .6); }
+    37.5% { transform: translateY(34px); }
+    40% { transform: translateY(34px); animation-timing-function: cubic-bezier(.2, .8, .3, 1); }
+    46%, 100% { transform: translateY(0); }
+}
+/* 16 s = two passes: CLEARED (barrier lifts, box rolls on) then SEIZED (box pulled) */
+@keyframes cc-cu-box {
+    0%, 26.9% { transform: translate(0, 0); opacity: 1; animation-timing-function: cubic-bezier(.55, 0, .9, .45); }
+    35% { transform: translate(290px, 0); opacity: 0; }
+    35.1%, 38.75% { transform: translate(-290px, 0); opacity: 0; animation-timing-function: cubic-bezier(.1, .55, .3, 1); }
+    47.5%, 78.75% { transform: translate(0, 0); opacity: 1; animation-timing-function: cubic-bezier(.55, 0, .9, .45); }
+    85% { transform: translate(0, 90px); opacity: 0; }
+    85.1%, 88.75% { transform: translate(-290px, 0); opacity: 0; animation-timing-function: cubic-bezier(.1, .55, .3, 1); }
+    97.5%, 100% { transform: translate(0, 0); opacity: 1; }
+}
+@keyframes cc-cu-ok {
+    0%, 18.75% { opacity: 0; transform: scale(1.5); }
+    19.8%, 35% { opacity: 1; transform: scale(1); }
+    35.1%, 100% { opacity: 0; transform: scale(1); }
+}
+@keyframes cc-cu-no {
+    0%, 68.75% { opacity: 0; transform: scale(1.5); }
+    69.8%, 85% { opacity: 1; transform: scale(1); }
+    85.1%, 100% { opacity: 0; transform: scale(1); }
+}
+@keyframes cc-cu-flag {
+    0%, 70% { opacity: 0; }
+    71%, 75%, 79%, 85% { opacity: 1; }
+    73%, 77% { opacity: .2; }
+    85.1%, 100% { opacity: 0; }
+}
+@keyframes cc-cu-arm {
+    0%, 23.75% { transform: rotate(0); animation-timing-function: cubic-bezier(.3, 0, .2, 1); }
+    27%, 35% { transform: rotate(80deg); animation-timing-function: cubic-bezier(.6, 0, .4, 1); }
+    38.5%, 100% { transform: rotate(0); }
+}
+@keyframes cc-cu-go { 0%, 23% { opacity: 0; } 24%, 38% { opacity: 1; } 39%, 100% { opacity: 0; } }
+@keyframes cc-cu-stop {
+    0%, 70% { opacity: 0; }
+    71%, 75%, 79%, 83% { opacity: 1; }
+    73%, 77%, 81% { opacity: .1; }
+    86%, 100% { opacity: 0; }
+}
+
+.cc-scene[data-mode=a] .cc-cu-scan { animation: cc-cu-drift 4s linear infinite; }
+.cc-scene[data-mode=a] .cc-cu-radar { animation: cc-spin 8s linear infinite; }
+.cc-scene[data-mode=a] .cc-cu-belt { animation: cc-dash16 2s linear infinite; }
+.cc-scene[data-mode=a] .cc-cu-beam { animation: cc-cu-amb 6s ease-in-out infinite alternate; }
+.cc-scene[data-mode=a] .cc-cu-warn,
+.cc-scene[data-mode=a] .cc-cu-blip { animation: cc-blink 2.4s ease-in-out infinite; }
+
+.cc-scene[data-mode=f] .cc-cu-scan { animation: cc-cu-drift 1.5s linear infinite; }
+.cc-scene[data-mode=f] .cc-cu-radar { animation: cc-spin 3s linear infinite; }
+.cc-scene[data-mode=f] .cc-cu-belt { animation: cc-dash16 .5s linear infinite; }
+.cc-scene[data-mode=f] .cc-cu-warn,
+.cc-scene[data-mode=f] .cc-cu-blip { animation: cc-blink 1s ease-in-out infinite; }
+.cc-scene[data-mode=f] .cc-cu-beam { animation: cc-cu-beam 8s infinite both; }
+.cc-scene[data-mode=f] .cc-cu-rev { animation: cc-cu-rev 8s infinite both; }
+.cc-scene[data-mode=f] .cc-cu-stamp { animation: cc-cu-stamp 8s infinite both; }
+.cc-scene[data-mode=f] .cc-cu-box { animation: cc-cu-box 16s infinite both; }
+.cc-scene[data-mode=f] .cc-cu-ok { animation: cc-cu-ok 16s infinite both; }
+.cc-scene[data-mode=f] .cc-cu-no { animation: cc-cu-no 16s infinite both; }
+.cc-scene[data-mode=f] .cc-cu-flag { animation: cc-cu-flag 16s infinite both; }
+.cc-scene[data-mode=f] .cc-cu-arm { animation: cc-cu-arm 16s infinite both; }
+.cc-scene[data-mode=f] .cc-cu-go { animation: cc-cu-go 16s infinite both; }
+.cc-scene[data-mode=f] .cc-cu-stop { animation: cc-cu-stop 16s infinite both; }
+
+/* ── Corporation ─────────────────────────────────────────────────────────── */
+@keyframes cc-co-tw { 0%, 42% { opacity: .9; } 50%, 92% { opacity: .12; } }
+@keyframes cc-co-ride { from { transform: translateY(170px); } to { transform: translateY(0); } }
+@keyframes cc-co-breath { from { opacity: .5; } to { opacity: 1; } }
+@keyframes cc-co-tick { to { transform: translateX(-400px); } }
+/* 8 s: windows wave up 0–3 s, line draws 0.4–3.4 s, lift rides 3.4–5.4 s, penthouse ignites */
+@keyframes cc-co-w { 0% { opacity: 0; } 4%, 82% { opacity: .95; } 92%, 100% { opacity: 0; } }
+@keyframes cc-co-line {
+    0%, 5% { stroke-dashoffset: 100; opacity: 1; }
+    42.5%, 90% { stroke-dashoffset: 0; opacity: 1; }
+    98%, 100% { stroke-dashoffset: 0; opacity: 0; }
+}
+@keyframes cc-co-head {
+    0%, 5% { stroke-dashoffset: 3; opacity: 0; }
+    6% { opacity: 1; }
+    42.5% { stroke-dashoffset: -97; opacity: 1; }
+    50%, 100% { stroke-dashoffset: -97; opacity: 0; }
+}
+@keyframes cc-co-area { 0%, 40% { opacity: 0; } 50%, 88% { opacity: 1; } 98%, 100% { opacity: 0; } }
+@keyframes cc-co-lift {
+    0% { transform: translateY(170px); opacity: 0; }
+    5% { transform: translateY(170px); opacity: 1; }
+    42.5% { transform: translateY(170px); animation-timing-function: cubic-bezier(.45, 0, .55, 1); }
+    67.5%, 92% { transform: translateY(0); opacity: 1; }
+    98%, 100% { transform: translateY(0); opacity: 0; }
+}
+@keyframes cc-co-pent {
+    0%, 66% { opacity: .15; }
+    70%, 80%, 92% { opacity: 1; }
+    75% { opacity: .55; }
+    100% { opacity: .15; }
+}
+
+.cc-scene[data-mode=a] .cc-co-t { animation: cc-co-tw 9s ease-in-out var(--n, 0s) infinite; }
+.cc-scene[data-mode=a] .cc-co-lift { animation: cc-co-ride 7s cubic-bezier(.45, 0, .55, 1) infinite alternate; }
+.cc-scene[data-mode=a] .cc-co-pent { animation: cc-co-breath 4s ease-in-out infinite alternate; }
+.cc-scene[data-mode=a] .cc-co-tick { animation: cc-co-tick 48s linear infinite; }
+.cc-scene[data-mode=a] .cc-co-head { animation: cc-blink 2.4s ease-in-out infinite; }
+.cc-scene .cc-co-beacon { animation: cc-blink 1.8s ease-in-out infinite; }
+
+.cc-scene[data-mode=f] .cc-co-w { animation: cc-co-w 8s ease-out var(--d, 0s) infinite both; }
+.cc-scene[data-mode=f] .cc-co-line { animation: cc-co-line 8s linear infinite both; }
+.cc-scene[data-mode=f] .cc-co-head { animation: cc-co-head 8s linear infinite both; }
+.cc-scene[data-mode=f] .cc-co-area { animation: cc-co-area 8s ease-in-out infinite both; }
+.cc-scene[data-mode=f] .cc-co-lift { animation: cc-co-lift 8s infinite both; }
+.cc-scene[data-mode=f] .cc-co-pent { animation: cc-co-pent 8s ease-in-out infinite both; }
+.cc-scene[data-mode=f] .cc-co-tick { animation: cc-co-tick 18s linear infinite; }
+
+/* ── Technician ──────────────────────────────────────────────────────────── */
+/* gear periods follow the tooth counts 12 : 18 : 8 so the mesh never slips */
+@keyframes cc-te-wr { 0% { transform: rotate(-30deg); } 40%, 55% { transform: rotate(30deg); } 90%, 100% { transform: rotate(-30deg); } }
+@keyframes cc-te-nut { 0% { transform: rotate(0); } 40%, 100% { transform: rotate(60deg); } }
+@keyframes cc-te-sp {
+    0% { transform: scale(.3); opacity: 0; }
+    8% { opacity: 1; }
+    45%, 100% { transform: scale(1.7); opacity: 0; }
+}
+
+.cc-scene[data-mode=a] .cc-te-ga { animation: cc-spin 24s linear infinite; }
+.cc-scene[data-mode=a] .cc-te-gb { animation: cc-spin 36s linear infinite reverse; }
+.cc-scene[data-mode=a] .cc-te-gc { animation: cc-spin 16s linear infinite; }
+.cc-scene[data-mode=a] .cc-te-p { animation: cc-dash100 5s linear var(--d, 0s) infinite; }
+.cc-scene[data-mode=a] .cc-te-sp { animation: cc-te-sp 4s ease-out var(--d, 0s) infinite both; }
+.cc-scene[data-mode=a] .cc-te-joint { animation: cc-blink 3s ease-in-out infinite; }
+
+.cc-scene[data-mode=f] .cc-te-ga { animation: cc-spin 6s linear infinite; }
+.cc-scene[data-mode=f] .cc-te-gb { animation: cc-spin 9s linear infinite reverse; }
+.cc-scene[data-mode=f] .cc-te-gc { animation: cc-spin 4s linear infinite; }
+.cc-scene[data-mode=f] .cc-te-p { animation: cc-dash100 1.8s linear var(--d, 0s) infinite; }
+.cc-scene[data-mode=f] .cc-te-sp { animation: cc-te-sp 1.3s ease-out var(--d, 0s) infinite both; }
+.cc-scene[data-mode=f] .cc-te-joint { animation: cc-blink 1.3s ease-in-out infinite; }
+.cc-scene[data-mode=f] .cc-te-wr { animation: cc-te-wr 2.4s cubic-bezier(.45, 0, .55, 1) infinite; }
+.cc-scene[data-mode=f] .cc-te-nut { animation: cc-te-nut 2.4s cubic-bezier(.45, 0, .55, 1) infinite; }

@@ -28,6 +28,7 @@ import {
 } from '@phosphor-icons/react';
 import { route } from 'ziggy-js';
 import { Badge, Button, Field, Input, StatBar, cn, textLabel, type Tone } from '@/Components/ui';
+import { CareerScene, hasCareerScene } from '@/Components/charcreate/CareerScene';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -260,25 +261,40 @@ function CareerArt({
                     maskImage: 'radial-gradient(90% 70% at 50% 35%, #000 20%, transparent 75%)',
                 }}
             />
-            {/* big glyph */}
-            <div
-                className={cn(
-                    'absolute flex items-center justify-center transition-[opacity,right] duration-[450ms] ease-out motion-reduce:transition-none',
-                    compact ? 'inset-y-0 right-[-8%] w-[60%]' : 'left-0 top-[11%] h-[50%]',
-                    muted && 'opacity-0',
-                )}
-                style={compact ? undefined : { right: rightInset }}
-            >
-                <Glyph
-                    weight="thin"
+            {/* motion graphic (or, for an unknown career, the big glyph) */}
+            {hasCareerScene(career.code) ? (
+                <CareerScene
+                    code={career.code}
+                    mode={kenBurns ? 'full' : 'ambient'}
+                    paused={muted}
+                    align={compact ? 'xMaxYMid meet' : 'xMidYMid meet'}
                     className={cn(
-                        'transition-opacity duration-[450ms] motion-reduce:transition-none',
-                        compact ? 'h-[150%] w-[150%] opacity-[0.18]' : 'h-full w-full max-w-[400px]',
-                        !compact && (kenBurns ? 'opacity-[0.34]' : 'opacity-[0.2]'),
+                        'absolute transition-[opacity,right] duration-[450ms] ease-out motion-reduce:transition-none',
+                        compact ? 'right-0 top-0 h-[min(132px,100%)] w-[60%] [mask-image:linear-gradient(180deg,#000_55%,transparent)]' : 'left-0 top-[9%] h-[50%]',
+                        muted ? 'opacity-0' : compact ? (kenBurns ? 'opacity-75' : 'opacity-50') : kenBurns ? 'opacity-100' : 'opacity-60',
                     )}
-                    style={{ color: `rgb(${theme.rgb})`, filter: `drop-shadow(0 0 28px rgba(${theme.rgb}, 0.45))` }}
+                    style={compact ? undefined : { right: rightInset }}
                 />
-            </div>
+            ) : (
+                <div
+                    className={cn(
+                        'absolute flex items-center justify-center transition-[opacity,right] duration-[450ms] ease-out motion-reduce:transition-none',
+                        compact ? 'inset-y-0 right-[-8%] w-[60%]' : 'left-0 top-[11%] h-[50%]',
+                        muted && 'opacity-0',
+                    )}
+                    style={compact ? undefined : { right: rightInset }}
+                >
+                    <Glyph
+                        weight="thin"
+                        className={cn(
+                            'transition-opacity duration-[450ms] motion-reduce:transition-none',
+                            compact ? 'h-[150%] w-[150%] opacity-[0.18]' : 'h-full w-full max-w-[400px]',
+                            !compact && (kenBurns ? 'opacity-[0.34]' : 'opacity-[0.2]'),
+                        )}
+                        style={{ color: `rgb(${theme.rgb})`, filter: `drop-shadow(0 0 28px rgba(${theme.rgb}, 0.45))` }}
+                    />
+                </div>
+            )}
             {/* index numeral */}
             {!compact && (
                 <div
@@ -775,7 +791,7 @@ function MobileStack({ careers, cities, form, selected, choose }: SharedProps) {
                                         <theme.icon size={14} weight="bold" />
                                     </div>
                                     {isSel && (
-                                        <span className={cn(textLabel, 'flex items-center gap-1 text-cyan-300')}>
+                                        <span className={cn(textLabel, 'flex items-center gap-1 rounded-full bg-slate-950/80 px-2 py-0.5 text-cyan-300')}>
                                             <Check size={12} weight="bold" /> Selected
                                         </span>
                                     )}
