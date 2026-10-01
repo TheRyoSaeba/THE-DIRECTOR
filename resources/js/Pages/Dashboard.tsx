@@ -160,14 +160,7 @@ export default function Dashboard({ dashboard }: { dashboard: DashboardData }) {
 
     return (
         <>
-            <Head title="Profile Dashboard">
-                <script
-                    head-key="adsense-loader"
-                    async
-                    src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1145262174285661"
-                    crossOrigin="anonymous"
-                />
-            </Head>
+            <Head title="Profile Dashboard" />
             <div className="max-w-5xl mx-auto px-6 py-10 space-y-6">
 
                 <motion.div

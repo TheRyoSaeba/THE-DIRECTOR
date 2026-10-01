@@ -10,11 +10,8 @@ COPY public public
 COPY vite.config.js postcss.config.js tailwind.config.js tsconfig.json ./
 
 COPY app/Models app/Models
-RUN npm run build \
-    && if [ -f public/build/.vite/manifest.json ]; then \
-        mv public/build/.vite/manifest.json public/build/manifest.json; \
-        rm -rf public/build/.vite; \
-    fi
+# laravel-vite-plugin writes public/build/manifest.json (where @vite reads it).
+RUN npm run build
 
 
 FROM composer:2 AS vendor

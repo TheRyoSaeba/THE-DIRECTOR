@@ -29,17 +29,27 @@ export default defineConfig(({ mode }) => {
     return {
         plugins,
         build: {
-            manifest: true,
             outDir: 'public/build',
             rollupOptions: {
                 output: {
                     assetFileNames: 'assets/[name]-[hash][extname]',
                     chunkFileNames: 'assets/[name]-[hash].js',
                     entryFileNames: 'assets/[name]-[hash].js',
-                    manualChunks: {
-                        'vendor-react': ['react', 'react-dom', '@inertiajs/react'],
-                        'vendor-animation': ['framer-motion'],
-                        'vendor-icons': ['@phosphor-icons/react'],
+                    // Function form so we control exactly which node_modules land where.
+                    // react/jsx-runtime + scheduler must sit with React (not with
+                    // framer-motion), and icons are NOT grouped: each Phosphor icon is
+                    // bundled with the pages that actually use it.
+                    manualChunks(id) {
+                        if (!id.includes('/node_modules/')) {
+                            return undefined;
+                        }
+                        if (/\/node_modules\/(react|react-dom|scheduler|@inertiajs\/[^/]+)\//.test(id)) {
+                            return 'vendor-react';
+                        }
+                        if (/\/node_modules\/(framer-motion|motion-dom|motion-utils)\//.test(id)) {
+                            return 'vendor-animation';
+                        }
+                        return undefined;
                     },
                 },
             },

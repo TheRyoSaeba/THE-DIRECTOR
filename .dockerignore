@@ -10,6 +10,9 @@
 node_modules
 vendor
 
+# Vite dev-server marker: if copied into an image, @vite would load assets from localhost:5173
+public/hot
+
 storage/logs/*
 storage/framework/cache/*
 storage/framework/sessions/*

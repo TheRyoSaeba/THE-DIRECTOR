@@ -1,10 +1,8 @@
 import { Page, PageProps, Errors, ErrorBag } from '@inertiajs/core';
-import type { AxiosStatic } from 'axios';
 
 declare global {
     interface Window {
         route: any;
-        axios: AxiosStatic;
     }
 }
 
