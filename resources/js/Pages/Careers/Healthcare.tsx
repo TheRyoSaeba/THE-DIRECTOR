@@ -202,7 +202,8 @@ function SurgeryTab({ surgeryQueue, surgeryFee, surgeonCut, rank }: {
         router.post(
             route('career.healthcare.surgery'),
             { character_id: id },
-            { preserveScroll: true, onFinish: () => setOperating(null) }
+            // Partial reload: the queue/ward plus shared 'auth' (cash, XP, timers) and 'flash'.
+            { only: ['surgery_queue', 'patients', 'auth', 'flash'], preserveScroll: true, onFinish: () => setOperating(null) }
         );
     };
 
@@ -299,7 +300,7 @@ function GenderTab({ genderQueue, genderFee, surgeonCut, rank }: {
         router.post(
             route('career.healthcare.gender'),
             { character_id: id },
-            { preserveScroll: true, onFinish: () => setOperating(null) }
+            { only: ['gender_queue', 'patients', 'auth', 'flash'], preserveScroll: true, onFinish: () => setOperating(null) }
         );
     };
 
@@ -387,6 +388,7 @@ function StaffTab({ staff, isChief, isOwner }: {
             route('career.healthcare.dismiss'),
             { character_id: dismissTarget.id },
             {
+                only: ['staff', 'auth', 'flash'],
                 preserveScroll: true,
                 onFinish: () => { setLoading(false); setDismissTarget(null); },
             }

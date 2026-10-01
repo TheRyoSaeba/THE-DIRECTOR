@@ -663,20 +663,26 @@ class CareerController extends Controller
             }
         }
 
-        $foundingBlocker = CorporationController::getFoundingBlocker($character);
-        $showFoundingForm = strcasecmp($character->career?->code, 'corporation') === 0
-            && !$character->corporation_id
-            && !$character->isMayor()
-            && CorporationController::isFoundingRankEligible($character);
+        // Every page prop below is lazy: partial reloads (`only: [...]`, incl.
+        // dot paths such as `corporation.members`) only run the queries of the
+        // props they ask for. Shared setup is memoized per request so a full
+        // page load runs the same queries as before, exactly once.
+        $boardroom = function () use ($character) {
+            $foundingBlocker = CorporationController::getFoundingBlocker($character);
+            $showFoundingForm = strcasecmp($character->career?->code, 'corporation') === 0
+                && !$character->corporation_id
+                && !$character->isMayor()
+                && CorporationController::isFoundingRankEligible($character);
 
-        $boardroom = [
-            'canFound' => $foundingBlocker === null,
-            'showFoundingForm' => $showFoundingForm,
-            'foundingCost' => CorporationController::FOUNDING_COST,
-            'blocker' => $foundingBlocker,
-            'homeCity' => $character->homeCity?->name,
-            'currentRank' => $character->current_rank?->rank_name ?? 'Staff',
-        ];
+            return [
+                'canFound' => $foundingBlocker === null,
+                'showFoundingForm' => $showFoundingForm,
+                'foundingCost' => CorporationController::FOUNDING_COST,
+                'blocker' => $foundingBlocker,
+                'homeCity' => $character->homeCity?->name,
+                'currentRank' => $character->current_rank?->rank_name ?? 'Staff',
+            ];
+        };
 
         if (!$corp) {
             return Inertia::render('Careers/Corporate', [
@@ -687,173 +693,268 @@ class CareerController extends Controller
             ]);
         }
 
-        $memberLoader = fn($q) => $q->select(
-            'id',
-            'display_name',
-            'corporation_id',
-            'corporation_position',
-            'corporation_reports_to_id',
-            'career_id',
-            'career_rank',
-            'career_xp',
-            'health',
-            'deleted_at',
-            'custom_avatar_url',
-            'gender'
-        )->orderByDesc('career_xp');
+        $ctx = $this->corporatePageContext($character, $corp);
+        // Resolve a prop only after the shared relation load has run, so its
+        // relations come from the eager load (same queries/columns as before).
+        $afterCore = fn (\Closure $resolve) => function () use ($ctx, $resolve) {
+            $ctx['core']();
 
-        $subsidiarySelect = fn($q) => $q->select(
-            'id',
-            'name',
-            'home_city_id',
-            'founder_id',
-            'ceo_id',
-            'parent_trust_id',
-            'is_holding_company',
-            'image_url',
-            'slush_fund',
-            'cash_reserves',
-        )->orderBy('name');
+            return $resolve();
+        };
 
-        // Build the full relation map in one pass so Laravel executes
-        // exactly one query per relation regardless of which branch applies.
-        $relations = [
-            'members' => $memberLoader,
-            'ceo:id,display_name,career_rank',
-            'city:id,name,slug',
-            'properties' => fn($q) => $q->owned()->orderBy('type')->orderBy('tier'),
-        ];
+        return Inertia::render('Careers/Corporate', [
+            'myId' => $character->id,
+            'boardroom' => $boardroom,
+            'isLocalEnvironment' => app()->isLocal(),
+            // Plain array of lazy leaves so the client can request individual
+            // `corporation.<key>` paths; key order matches the previous payload.
+            'corporation' => [
+                'id' => $corp->id,
+                'name' => $corp->name,
+                'imageUrl' => $corp->image_url,
+                'boardNotes' => $corp->board_notes,
+                'city' => $afterCore(fn () => $corp->city?->name ?? 'Unknown'),
+                'isHoldingCompany' => (bool) $corp->is_holding_company,
+                'parentTrustId' => $corp->parent_trust_id,
+                'parentTrust' => $afterCore(fn () => $corp->parentTrust ? [
+                    'id' => $corp->parentTrust->id,
+                    'name' => $corp->parentTrust->name,
+                    'imageUrl' => $corp->parentTrust->image_url,
+                    'city' => $corp->parentTrust->city?->name ?? 'Unknown',
+                ] : null),
+                'holdingContext' => fn () => $ctx['holdingContext'](),
+                // Operating companies only need their own row; holding companies
+                // sum their subsidiaries (from the shared relation load).
+                'cash_reserves' => fn () => $corp->is_holding_company
+                    ? $afterCore(fn () => (int) $corp->cash_reserves + (int) $corp->subsidiaries->sum('cash_reserves'))()
+                    : (int) $corp->cash_reserves,
+                'slush_fund' => fn () => $corp->is_holding_company
+                    ? $afterCore(fn () => (int) $corp->slush_fund + (int) $corp->subsidiaries->sum('slush_fund'))()
+                    : (int) $corp->slush_fund,
+                'total_profits' => $corp->total_profits,
+                'ceo' => $afterCore(fn () => ['id' => $corp->ceo_id, 'name' => $corp->ceo?->display_name ?? 'Vacant']),
+                'isCeo' => $corp->isCeo($character),
+                'isCfo' => $corp->roleFor($character) === Corporation::POSITION_CFO,
+                'isFounder' => $corp->isFounder($character),
+                'maxMembers' => $corp->max_member_slots,
+                'ceoCareerRank' => $afterCore(fn () => $corp->ceo?->career_rank ?? 0),
+                // Properties tab only: not sent on first load, the page requests
+                // them (partial reload) when the Properties tab is opened.
+                'properties' => Inertia::optional(fn () => $ctx['properties']()['owned']),
+                'purchasableProperties' => Inertia::optional(fn () => $ctx['properties']()['templates']),
+                'propertyTemplates' => Inertia::optional(fn () => $ctx['properties']()['templates']),
+                'propertyTaxRate' => Inertia::optional(fn () => $ctx['properties']()['taxRate']),
+                'members' => $afterCore(fn () => $corp->members->map(fn($m) => $ctx['core']()['mapMember']($m, $corp))),
+                'subsidiaries' => $afterCore(fn () => $corp->is_holding_company
+                    ? $corp->subsidiaries->map($ctx['core']()['mapOperatingCompany'])
+                    : []),
+                // Company Actions tab only: requested when that tab is opened.
+                'merger' => Inertia::optional(fn () => $ctx['merger']()),
+                'subsidiaryInvites' => fn () => $ctx['board']()['subsidiaryInvites'],
+                'boardActions' => fn () => $ctx['board']()['boardActions'],
+                'pendingMoveRequest' => fn () => $corp->pendingMoveRequest(),
+                'moveFee' => Corporation::MOVE_HQ_FEE,
+                'isPhaseOneOperatingCompany' => CorporationController::isPhaseOneOperatingCompany($corp),
+            ],
+        ]);
+    }
 
-        if ($corp->parent_trust_id) {
-            $relations['parentTrust:id,name,image_url,home_city_id,is_holding_company,parent_trust_id'] = null;
-            $relations['parentTrust.members'] = $memberLoader;
-            $relations['parentTrust.activeSubsidiaries'] = $subsidiarySelect;
-            $relations['parentTrust.activeSubsidiaries.members'] = fn($query) => $memberLoader($query)
-                ->where('corporation_id', '!=', $corp->id);
-            $relations['parentTrust.activeSubsidiaries.ceo'] = function ($query) use ($corp) {
-                $query->select('id', 'display_name', 'career_rank');
+    /**
+     * Wrap a builder so it runs at most once per request (shared setup for
+     * several lazy Inertia props).
+     */
+    private static function memoOnce(\Closure $builder): \Closure
+    {
+        $resolved = false;
+        $value = null;
 
-                if ($corp->ceo_id) {
-                    $query->where('id', '!=', $corp->ceo_id);
-                }
-            };
-        }
-
-        if ($corp->is_holding_company) {
-            $relations['subsidiaries'] = $subsidiarySelect;
-            $relations['subsidiaries.members'] = $memberLoader;
-            $relations['subsidiaries.ceo:id,display_name,career_rank'] = null;
-        }
-
-        // Remove null-valued string keys (the colon-notation relations
-        // that don't need closures) and re-pack so load() receives them
-        // correctly — string keys without closures must be plain values.
-        $eagerLoad = [];
-        foreach ($relations as $key => $closure) {
-            if (is_int($key)) {
-                $eagerLoad[] = $closure; // numeric key: value is the relation string
-            } elseif ($closure === null) {
-                $eagerLoad[] = $key;    // string key with null: key is the relation
-            } else {
-                $eagerLoad[$key] = $closure; // string key with closure
+        return function () use (&$resolved, &$value, $builder) {
+            if (!$resolved) {
+                $value = $builder();
+                $resolved = true;
             }
-        }
 
-        $corp->load($eagerLoad);
+            return $value;
+        };
+    }
 
-        if ($corp->relationLoaded('city') && $corp->relationLoaded('subsidiaries')) {
-            foreach ($corp->subsidiaries as $subsidiary) {
-                if ((int) $subsidiary->home_city_id === (int) $corp->home_city_id) {
-                    $subsidiary->setRelation('city', $corp->city);
+    /**
+     * Lazily-built, memoized data groups for the corporate page. Each entry is
+     * a closure; nothing is queried until a prop that needs it is resolved.
+     *
+     * @return array<string, \Closure>
+     */
+    private function corporatePageContext(Character $character, Corporation $corp): array
+    {
+        // ── core: member/subsidiary/parent-trust relations + rank cache ──
+        $core = self::memoOnce(function () use ($corp) {
+            $memberLoader = fn($q) => $q->select(
+                'id',
+                'display_name',
+                'corporation_id',
+                'corporation_position',
+                'corporation_reports_to_id',
+                'career_id',
+                'career_rank',
+                'career_xp',
+                'health',
+                'deleted_at',
+                'custom_avatar_url',
+                'gender'
+            )->orderByDesc('career_xp');
+
+            $subsidiarySelect = fn($q) => $q->select(
+                'id',
+                'name',
+                'home_city_id',
+                'founder_id',
+                'ceo_id',
+                'parent_trust_id',
+                'is_holding_company',
+                'image_url',
+                'slush_fund',
+                'cash_reserves',
+            )->orderBy('name');
+
+            // Build the full relation map in one pass so Laravel executes
+            // exactly one query per relation regardless of which branch applies.
+            // (Owned properties are loaded by the properties group below.)
+            $relations = [
+                'members' => $memberLoader,
+                'ceo:id,display_name,career_rank',
+                'city:id,name,slug',
+            ];
+
+            if ($corp->parent_trust_id) {
+                $relations['parentTrust:id,name,image_url,home_city_id,is_holding_company,parent_trust_id'] = null;
+                $relations['parentTrust.members'] = $memberLoader;
+                $relations['parentTrust.activeSubsidiaries'] = $subsidiarySelect;
+                $relations['parentTrust.activeSubsidiaries.members'] = fn($query) => $memberLoader($query)
+                    ->where('corporation_id', '!=', $corp->id);
+                $relations['parentTrust.activeSubsidiaries.ceo'] = function ($query) use ($corp) {
+                    $query->select('id', 'display_name', 'career_rank');
+
+                    if ($corp->ceo_id) {
+                        $query->where('id', '!=', $corp->ceo_id);
+                    }
+                };
+            }
+
+            if ($corp->is_holding_company) {
+                $relations['subsidiaries'] = $subsidiarySelect;
+                $relations['subsidiaries.members'] = $memberLoader;
+                $relations['subsidiaries.ceo:id,display_name,career_rank'] = null;
+            }
+
+            // Remove null-valued string keys (the colon-notation relations
+            // that don't need closures) and re-pack so load() receives them
+            // correctly — string keys without closures must be plain values.
+            $eagerLoad = [];
+            foreach ($relations as $key => $closure) {
+                if (is_int($key)) {
+                    $eagerLoad[] = $closure; // numeric key: value is the relation string
+                } elseif ($closure === null) {
+                    $eagerLoad[] = $key;    // string key with null: key is the relation
+                } else {
+                    $eagerLoad[$key] = $closure; // string key with closure
                 }
             }
-        }
 
-        if ($corp->parentTrust && $corp->relationLoaded('city')) {
-            $corp->parentTrust->setRelation('city', $corp->city);
-        }
+            $corp->load($eagerLoad);
 
-        if (
-            $corp->parentTrust?->relationLoaded('city')
-            && $corp->parentTrust->relationLoaded('activeSubsidiaries')
-        ) {
-            foreach ($corp->parentTrust->activeSubsidiaries as $subsidiary) {
-                if ((int) $subsidiary->home_city_id === (int) $corp->parentTrust->home_city_id) {
-                    $subsidiary->setRelation('city', $corp->parentTrust->city);
-                }
-            }
-        }
-
-        if ($corp->parentTrust?->relationLoaded('activeSubsidiaries')) {
-            $currentSubsidiary = $corp->parentTrust->activeSubsidiaries->firstWhere('id', $corp->id);
-
-            if ($currentSubsidiary) {
-                foreach (['members', 'ceo', 'city'] as $relation) {
-                    if ($corp->relationLoaded($relation)) {
-                        $currentSubsidiary->setRelation($relation, $corp->getRelation($relation));
+            if ($corp->relationLoaded('city') && $corp->relationLoaded('subsidiaries')) {
+                foreach ($corp->subsidiaries as $subsidiary) {
+                    if ((int) $subsidiary->home_city_id === (int) $corp->home_city_id) {
+                        $subsidiary->setRelation('city', $corp->city);
                     }
                 }
             }
-        }
 
-        // ── Pre-resolve all rank names in one query ────────────────────────
-        // $mapMember calls $m->current_rank which hits CareerRank per member.
-        // Instead, bulk-load all rank name/avatar combos and resolve from a map.
-        $allMembers = collect($corp->members ?? []);
-        if ($corp->is_holding_company) {
-            foreach ($corp->subsidiaries ?? [] as $sub) {
-                $allMembers = $allMembers->merge($sub->members ?? []);
+            if ($corp->parentTrust && $corp->relationLoaded('city')) {
+                $corp->parentTrust->setRelation('city', $corp->city);
             }
-        }
-        if ($corp->parentTrust) {
-            $allMembers = $allMembers->merge($corp->parentTrust->members ?? []);
-            foreach ($corp->parentTrust->activeSubsidiaries ?? [] as $sub) {
-                $allMembers = $allMembers->merge($sub->members ?? []);
+
+            if (
+                $corp->parentTrust?->relationLoaded('city')
+                && $corp->parentTrust->relationLoaded('activeSubsidiaries')
+            ) {
+                foreach ($corp->parentTrust->activeSubsidiaries as $subsidiary) {
+                    if ((int) $subsidiary->home_city_id === (int) $corp->parentTrust->home_city_id) {
+                        $subsidiary->setRelation('city', $corp->parentTrust->city);
+                    }
+                }
             }
-        }
-        $careerIds = $allMembers->pluck('career_id')->unique()->filter()->values()->all();
-        $rankLevels = $allMembers->pluck('career_rank')->unique()->filter()->values()->all();
-        $rankCache = \App\Models\CareerRank::bulkLoadForCharacters($careerIds, $rankLevels);
-        // key: "{career_id}_{career_rank}" => ['rank_name' => ..., 'avatar_url' => ...]
 
-        $mapMember = function (Character $m, Corporation $scopeCorp) use ($rankCache) {
-            $rk = $rankCache["{$m->career_id}_{$m->career_rank}"] ?? null;
-            return [
-                'id' => $m->id,
-                'name' => $m->display_name,
-                'avatarUrl' => $m->custom_avatar_url ?: ($rk['avatar_url'] ?? null),
-                'position' => (int) $scopeCorp->ceo_id === (int) $m->id
-                    ? 'CEO'
-                    : match ($m->corporation_position) {
-                        Corporation::POSITION_DIRECTOR_OF_BOARD => 'BOARD_DIRECTOR',
-                        default => strtoupper($m->corporation_position ?? 'member'),
-                    },
-                'positionRaw' => $m->corporation_position,
-                'reportsToId' => $m->corporation_reports_to_id,
-                'reportsToName' => $scopeCorp->members->firstWhere('id', $m->corporation_reports_to_id)?->display_name,
-                'rank' => $rk['rank_name'] ?? 'Staff',
-                'careerRank' => $m->career_rank ?? 0,
-                'isCeo' => (int) $scopeCorp->ceo_id === (int) $m->id,
-                'isFounder' => (int) $scopeCorp->founder_id === (int) $m->id,
-            ];
-        };
+            if ($corp->parentTrust?->relationLoaded('activeSubsidiaries')) {
+                $currentSubsidiary = $corp->parentTrust->activeSubsidiaries->firstWhere('id', $corp->id);
 
-        $mapOperatingCompany = function (Corporation $company) use ($mapMember) {
-            return [
-                'id' => $company->id,
-                'name' => $company->name,
-                'imageUrl' => $company->image_url,
-                'city' => $company->city?->name ?? 'Unknown',
-                'ceo' => ['id' => $company->ceo_id, 'name' => $company->ceo?->display_name ?? 'Vacant'],
-                'members' => $company->members->map(fn($m) => $mapMember($m, $company)),
-            ];
-        };
+                if ($currentSubsidiary) {
+                    foreach (['members', 'ceo', 'city'] as $relation) {
+                        if ($corp->relationLoaded($relation)) {
+                            $currentSubsidiary->setRelation($relation, $corp->getRelation($relation));
+                        }
+                    }
+                }
+            }
 
-        $canUseMerger = $corp->isCeo($character)
-            && CorporationController::isPhaseOneOperatingCompany($corp)
-            && !CorporationController::hasHoldingCompanyInCity((int) $corp->home_city_id);
+            // ── Pre-resolve all rank names in one query ────────────────────────
+            // $mapMember calls $m->current_rank which hits CareerRank per member.
+            // Instead, bulk-load all rank name/avatar combos and resolve from a map.
+            $allMembers = collect($corp->members ?? []);
+            if ($corp->is_holding_company) {
+                foreach ($corp->subsidiaries ?? [] as $sub) {
+                    $allMembers = $allMembers->merge($sub->members ?? []);
+                }
+            }
+            if ($corp->parentTrust) {
+                $allMembers = $allMembers->merge($corp->parentTrust->members ?? []);
+                foreach ($corp->parentTrust->activeSubsidiaries ?? [] as $sub) {
+                    $allMembers = $allMembers->merge($sub->members ?? []);
+                }
+            }
+            $careerIds = $allMembers->pluck('career_id')->unique()->filter()->values()->all();
+            $rankLevels = $allMembers->pluck('career_rank')->unique()->filter()->values()->all();
+            $rankCache = \App\Models\CareerRank::bulkLoadForCharacters($careerIds, $rankLevels);
+            // key: "{career_id}_{career_rank}" => ['rank_name' => ..., 'avatar_url' => ...]
 
-        $incomingSubsidiaryInvites = CorporationSubsidiaryInvite::pending()
+            $mapMember = function (Character $m, Corporation $scopeCorp) use ($rankCache) {
+                $rk = $rankCache["{$m->career_id}_{$m->career_rank}"] ?? null;
+                return [
+                    'id' => $m->id,
+                    'name' => $m->display_name,
+                    'avatarUrl' => $m->custom_avatar_url ?: ($rk['avatar_url'] ?? null),
+                    'position' => (int) $scopeCorp->ceo_id === (int) $m->id
+                        ? 'CEO'
+                        : match ($m->corporation_position) {
+                            Corporation::POSITION_DIRECTOR_OF_BOARD => 'BOARD_DIRECTOR',
+                            default => strtoupper($m->corporation_position ?? 'member'),
+                        },
+                    'positionRaw' => $m->corporation_position,
+                    'reportsToId' => $m->corporation_reports_to_id,
+                    'reportsToName' => $scopeCorp->members->firstWhere('id', $m->corporation_reports_to_id)?->display_name,
+                    'rank' => $rk['rank_name'] ?? 'Staff',
+                    'careerRank' => $m->career_rank ?? 0,
+                    'isCeo' => (int) $scopeCorp->ceo_id === (int) $m->id,
+                    'isFounder' => (int) $scopeCorp->founder_id === (int) $m->id,
+                ];
+            };
+
+            $mapOperatingCompany = function (Corporation $company) use ($mapMember) {
+                return [
+                    'id' => $company->id,
+                    'name' => $company->name,
+                    'imageUrl' => $company->image_url,
+                    'city' => $company->city?->name ?? 'Unknown',
+                    'ceo' => ['id' => $company->ceo_id, 'name' => $company->ceo?->display_name ?? 'Vacant'],
+                    'members' => $company->members->map(fn($m) => $mapMember($m, $company)),
+                ];
+            };
+
+            return ['mapMember' => $mapMember, 'mapOperatingCompany' => $mapOperatingCompany];
+        });
+
+        // Shared by the merger (successor list gate) and subsidiary-invite groups.
+        $incomingSubsidiaryInvites = self::memoOnce(fn () => CorporationSubsidiaryInvite::pending()
             ->with([
                 'holdingCompany:id,name',
                 'targetCorporation:id,name',
@@ -861,342 +962,374 @@ class CareerController extends Controller
             ])
             ->where('target_ceo_id', $character->id)
             ->orderByDesc('created_at')
-            ->get();
-        $eligibleSuccessors = ($canUseMerger || $incomingSubsidiaryInvites->isNotEmpty())
-            ? $corp->members
-                ->filter(fn($member) => CorporationController::isEligibleMergerSuccessor($corp, $member))
-                ->values()
-                ->map(fn($member) => [
-                    'id' => $member->id,
-                    'name' => $member->display_name,
-                    'rank' => $member->current_rank?->rank_name ?? 'Staff',
-                ])
-            : collect();
+            ->get());
 
-        $mergerTargets = $canUseMerger
-            ? Corporation::query()
-                ->select('id', 'name', 'home_city_id', 'ceo_id', 'is_holding_company', 'parent_trust_id')
-                ->with(['city:id,name,slug', 'ceo:id,display_name'])
-                ->where('home_city_id', $corp->home_city_id)
-                ->where('id', '!=', $corp->id)
-                ->where('is_holding_company', false)
-                ->whereNull('parent_trust_id')
-                ->orderBy('name')
-                ->get()
-                ->filter(fn($candidate) => $candidate->ceo_id)
-                ->values()
-                ->map(fn($candidate) => [
-                    'id' => $candidate->id,
-                    'name' => $candidate->name,
-                    'city' => $candidate->city?->name ?? 'Unknown',
-                    'ceoName' => $candidate->ceo?->display_name ?? 'Vacant',
-                ])
-            : collect();
+        // ── merger ──
+        $merger = self::memoOnce(function () use ($character, $corp, $core, $incomingSubsidiaryInvites) {
+            $core();
 
-        $mergerRequests = CorporationMergerRequest::pending()
-            ->with([
-                'requester:id,display_name',
-                'target:id,display_name',
-                'requesterCorporation:id,name',
-                'targetCorporation:id,name',
-                'requesterSuccessor:id,display_name',
-            ])
-            ->where(function ($query) use ($character) {
-                $query->where('requester_id', $character->id)
-                    ->orWhere('target_id', $character->id);
-            })
-            ->orderByDesc('created_at')
-            ->get();
+            $canUseMerger = $corp->isCeo($character)
+                && CorporationController::isPhaseOneOperatingCompany($corp)
+                && !CorporationController::hasHoldingCompanyInCity((int) $corp->home_city_id);
 
-        $merger = [
-            'canPropose' => $canUseMerger && $mergerRequests->isEmpty(),
-            'cost' => CorporationController::MERGER_COST,
-            'targets' => $mergerTargets,
-            'successors' => $eligibleSuccessors,
-            'incoming' => $mergerRequests
-                ->filter(fn($mergerRequest) => (int) $mergerRequest->target_id === (int) $character->id)
-                ->values()
-                ->map(fn($mergerRequest) => [
-                    'id' => $mergerRequest->id,
-                    'holdingName' => $mergerRequest->holding_name,
-                    'requesterName' => $mergerRequest->requester?->display_name,
-                    'requesterCorporationName' => $mergerRequest->requesterCorporation?->name,
-                    'targetCorporationName' => $mergerRequest->targetCorporation?->name,
-                    'requesterSuccessorName' => $mergerRequest->requesterSuccessor?->display_name,
-                    'expiresAt' => $mergerRequest->expires_at?->toIso8601String(),
-                ]),
-            'outgoing' => $mergerRequests
-                ->filter(fn($mergerRequest) => (int) $mergerRequest->requester_id === (int) $character->id)
-                ->values()
-                ->map(fn($mergerRequest) => [
-                    'id' => $mergerRequest->id,
-                    'holdingName' => $mergerRequest->holding_name,
-                    'targetName' => $mergerRequest->target?->display_name,
-                    'targetCorporationName' => $mergerRequest->targetCorporation?->name,
-                    'requesterSuccessorName' => $mergerRequest->requesterSuccessor?->display_name,
-                    'expiresAt' => $mergerRequest->expires_at?->toIso8601String(),
-                ]),
-        ];
-
-        $isHoldingBoardMember = $corp->isBoardMember($character);
-        $boardPromotionTargets = collect();
-        $pendingBoardPromotions = collect();
-        $kickableSubsidiaries = collect();
-        $subsidiaryInviteTargets = collect();
-        $outgoingSubsidiaryInvites = collect();
-        $trustVote = null;
-        $boardCapacity = $corp->is_holding_company ? $corp->boardCapacity() : 0;
-        $boardCount = $corp->is_holding_company ? $corp->boardMemberCount() : 0;
-        $pendingBoardIntakeCount = $corp->is_holding_company ? $corp->pendingBoardIntakeCount() : 0;
-        $availableBoardSlots = $corp->is_holding_company
-            ? max(0, $boardCapacity - $boardCount - $pendingBoardIntakeCount)
-            : 0;
-        $hasSubsidiaryCapacity = $corp->is_holding_company && $corp->hasSubsidiaryCapacity();
-
-        if ($corp->is_holding_company) {
-            $pendingBoardPromotions = CorporationBoardPromotion::pending()
-                ->with(['subsidiary:id,name', 'promotedCeo:id,display_name', 'successor:id,display_name'])
-                ->where('holding_company_id', $corp->id)
-                ->orderByDesc('created_at')
-                ->get()
-                ->map(fn($promotion) => [
-                    'id' => $promotion->id,
-                    'subsidiaryName' => $promotion->subsidiary?->name,
-                    'ceoName' => $promotion->promotedCeo?->display_name,
-                    'successorName' => $promotion->successor?->display_name,
-                ]);
-
-            $boardPromotionTargets = $corp->subsidiaries
-                ->map(function (Corporation $subsidiary) {
-                    $ceo = $subsidiary->ceo;
-
-
-                    $successors = $subsidiary->members
-                        ->filter(fn($member) => CorporationController::isEligibleMergerSuccessor($subsidiary, $member))
-                        ->values()
-                        ->map(fn($member) => [
-                            'id' => $member->id,
-                            'name' => $member->display_name,
-                        ]);
-
-                    return [
-                        'id' => $subsidiary->id,
-                        'name' => $subsidiary->name,
-                        'ceoName' => $ceo?->display_name ?? 'Vacant',
-                        'ready' => $ceo,
-                        'successors' => $successors,
-                    ];
-                })
-                ->values();
-
-            $kickableSubsidiaries = $corp->subsidiaries->count()
-                ? $corp->subsidiaries
-                    ->map(fn(Corporation $subsidiary) => [
-                        'id' => $subsidiary->id,
-                        'name' => $subsidiary->name,
-                        'ceoName' => $subsidiary->ceo?->display_name ?? 'Vacant',
-                        'memberCount' => $subsidiary->members->count(),
-                    ])
+            $eligibleSuccessors = ($canUseMerger || $incomingSubsidiaryInvites()->isNotEmpty())
+                ? $corp->members
+                    ->filter(fn($member) => CorporationController::isEligibleMergerSuccessor($corp, $member))
                     ->values()
+                    ->map(fn($member) => [
+                        'id' => $member->id,
+                        'name' => $member->display_name,
+                        'rank' => $member->current_rank?->rank_name ?? 'Staff',
+                    ])
                 : collect();
 
-            $trustBoardMembers = $corp->trustVoteBoardMembers();
-            $trustCandidates = $trustBoardMembers
-                ->filter(fn(Character $member) => $corp->isEligibleTrustVoter($member))
-                ->values()
-                ->map(fn(Character $member) => [
-                    'id' => $member->id,
-                    'name' => $member->display_name,
-                    'avatarUrl' => $member->avatar_url,
-                    'position' => $member->corporation_position === Corporation::POSITION_DIRECTOR_OF_BOARD
-                        ? 'BOARD_DIRECTOR'
-                        : strtoupper($member->corporation_position ?? 'member'),
-                ]);
+            $mergerTargets = $canUseMerger
+                ? Corporation::query()
+                    ->select('id', 'name', 'home_city_id', 'ceo_id', 'is_holding_company', 'parent_trust_id')
+                    ->with(['city:id,name,slug', 'ceo:id,display_name'])
+                    ->where('home_city_id', $corp->home_city_id)
+                    ->where('id', '!=', $corp->id)
+                    ->where('is_holding_company', false)
+                    ->whereNull('parent_trust_id')
+                    ->orderBy('name')
+                    ->get()
+                    ->filter(fn($candidate) => $candidate->ceo_id)
+                    ->values()
+                    ->map(fn($candidate) => [
+                        'id' => $candidate->id,
+                        'name' => $candidate->name,
+                        'city' => $candidate->city?->name ?? 'Unknown',
+                        'ceoName' => $candidate->ceo?->display_name ?? 'Vacant',
+                    ])
+                : collect();
 
-            $activeTrustVote = CorporationTrustVote::pending()
-                ->with('ballots:id,trust_vote_id,voter_id,candidate_id')
-                ->where('holding_company_id', $corp->id)
-                ->first();
+            $mergerRequests = CorporationMergerRequest::pending()
+                ->with([
+                    'requester:id,display_name',
+                    'target:id,display_name',
+                    'requesterCorporation:id,name',
+                    'targetCorporation:id,name',
+                    'requesterSuccessor:id,display_name',
+                ])
+                ->where(function ($query) use ($character) {
+                    $query->where('requester_id', $character->id)
+                        ->orWhere('target_id', $character->id);
+                })
+                ->orderByDesc('created_at')
+                ->get();
 
-            $promotionPendingTrustVote = CorporationTrustVote::promotionPending()
-                ->with('winner:id,display_name')
-                ->where('holding_company_id', $corp->id)
-                ->first();
+            return [
+                'canPropose' => $canUseMerger && $mergerRequests->isEmpty(),
+                'cost' => CorporationController::MERGER_COST,
+                'targets' => $mergerTargets,
+                'successors' => $eligibleSuccessors,
+                'incoming' => $mergerRequests
+                    ->filter(fn($mergerRequest) => (int) $mergerRequest->target_id === (int) $character->id)
+                    ->values()
+                    ->map(fn($mergerRequest) => [
+                        'id' => $mergerRequest->id,
+                        'holdingName' => $mergerRequest->holding_name,
+                        'requesterName' => $mergerRequest->requester?->display_name,
+                        'requesterCorporationName' => $mergerRequest->requesterCorporation?->name,
+                        'targetCorporationName' => $mergerRequest->targetCorporation?->name,
+                        'requesterSuccessorName' => $mergerRequest->requesterSuccessor?->display_name,
+                        'expiresAt' => $mergerRequest->expires_at?->toIso8601String(),
+                    ]),
+                'outgoing' => $mergerRequests
+                    ->filter(fn($mergerRequest) => (int) $mergerRequest->requester_id === (int) $character->id)
+                    ->values()
+                    ->map(fn($mergerRequest) => [
+                        'id' => $mergerRequest->id,
+                        'holdingName' => $mergerRequest->holding_name,
+                        'targetName' => $mergerRequest->target?->display_name,
+                        'targetCorporationName' => $mergerRequest->targetCorporation?->name,
+                        'requesterSuccessorName' => $mergerRequest->requesterSuccessor?->display_name,
+                        'expiresAt' => $mergerRequest->expires_at?->toIso8601String(),
+                    ]),
+            ];
+        });
 
-            $trustVoteBlocker = $corp->trustVoteReadinessBlocker($trustBoardMembers);
-            $trustVoteBallots = $activeTrustVote?->ballots ?? collect();
-            $trustVoteBallotsByVoter = $trustVoteBallots->keyBy('voter_id');
-            $trustVoteTallies = $trustVoteBallots
-                ->groupBy('candidate_id')
-                ->map(fn($ballots) => $ballots->count());
-            $trustCandidateIds = $trustCandidates
-                ->pluck('id')
-                ->map(fn($id) => (int) $id)
-                ->all();
+        // ── board actions + subsidiary invites ──
+        $board = self::memoOnce(function () use ($character, $corp, $core, $incomingSubsidiaryInvites) {
+            $core();
 
-            $trustVote = [
-                'visible' => (bool) $corp->is_holding_company,
-                'canStart' => !$activeTrustVote && !$promotionPendingTrustVote,
-                'blocker' => $trustVoteBlocker,
-                'boardCount' => $trustBoardMembers->count(),
-                'requiredVotes' => CorporationTrustVote::requiredVotesFor($trustBoardMembers->count()),
-                'boardMembers' => $trustBoardMembers->map(function (Character $member) use ($character, $trustCandidateIds, $trustVoteBallotsByVoter, $trustVoteTallies) {
-                    $ballot = $trustVoteBallotsByVoter->get($member->id);
+            $isHoldingBoardMember = $corp->isBoardMember($character);
+            $boardPromotionTargets = collect();
+            $pendingBoardPromotions = collect();
+            $kickableSubsidiaries = collect();
+            $subsidiaryInviteTargets = collect();
+            $trustVote = null;
+            $boardCapacity = $corp->is_holding_company ? $corp->boardCapacity() : 0;
+            $boardCount = $corp->is_holding_company ? $corp->boardMemberCount() : 0;
+            $pendingBoardIntakeCount = $corp->is_holding_company ? $corp->pendingBoardIntakeCount() : 0;
+            $availableBoardSlots = $corp->is_holding_company
+                ? max(0, $boardCapacity - $boardCount - $pendingBoardIntakeCount)
+                : 0;
+            $hasSubsidiaryCapacity = $corp->is_holding_company && $corp->hasSubsidiaryCapacity();
 
-                    return [
+            if ($corp->is_holding_company) {
+                $pendingBoardPromotions = CorporationBoardPromotion::pending()
+                    ->with(['subsidiary:id,name', 'promotedCeo:id,display_name', 'successor:id,display_name'])
+                    ->where('holding_company_id', $corp->id)
+                    ->orderByDesc('created_at')
+                    ->get()
+                    ->map(fn($promotion) => [
+                        'id' => $promotion->id,
+                        'subsidiaryName' => $promotion->subsidiary?->name,
+                        'ceoName' => $promotion->promotedCeo?->display_name,
+                        'successorName' => $promotion->successor?->display_name,
+                    ]);
+
+                $boardPromotionTargets = $corp->subsidiaries
+                    ->map(function (Corporation $subsidiary) {
+                        $ceo = $subsidiary->ceo;
+
+
+                        $successors = $subsidiary->members
+                            ->filter(fn($member) => CorporationController::isEligibleMergerSuccessor($subsidiary, $member))
+                            ->values()
+                            ->map(fn($member) => [
+                                'id' => $member->id,
+                                'name' => $member->display_name,
+                            ]);
+
+                        return [
+                            'id' => $subsidiary->id,
+                            'name' => $subsidiary->name,
+                            'ceoName' => $ceo?->display_name ?? 'Vacant',
+                            'ready' => $ceo,
+                            'successors' => $successors,
+                        ];
+                    })
+                    ->values();
+
+                $kickableSubsidiaries = $corp->subsidiaries->count()
+                    ? $corp->subsidiaries
+                        ->map(fn(Corporation $subsidiary) => [
+                            'id' => $subsidiary->id,
+                            'name' => $subsidiary->name,
+                            'ceoName' => $subsidiary->ceo?->display_name ?? 'Vacant',
+                            'memberCount' => $subsidiary->members->count(),
+                        ])
+                        ->values()
+                    : collect();
+
+                $trustBoardMembers = $corp->trustVoteBoardMembers();
+                $trustCandidates = $trustBoardMembers
+                    ->filter(fn(Character $member) => $corp->isEligibleTrustVoter($member))
+                    ->values()
+                    ->map(fn(Character $member) => [
                         'id' => $member->id,
                         'name' => $member->display_name,
                         'avatarUrl' => $member->avatar_url,
                         'position' => $member->corporation_position === Corporation::POSITION_DIRECTOR_OF_BOARD
                             ? 'BOARD_DIRECTOR'
                             : strtoupper($member->corporation_position ?? 'member'),
-                        'isMe' => (int) $member->id === (int) $character->id,
-                        'isCandidate' => in_array((int) $member->id, $trustCandidateIds, true),
-                        'votes' => (int) ($trustVoteTallies[$member->id] ?? 0),
-                        'hasVoted' => (bool) $ballot,
-                    ];
-                })->values(),
-                'candidates' => $trustCandidates->map(fn(array $candidate) => [
-                    ...$candidate,
-                    'votes' => (int) ($trustVoteTallies[$candidate['id']] ?? 0),
-                    'isMe' => (int) $candidate['id'] === (int) $character->id,
-                ]),
-                'active' => $activeTrustVote ? [
-                    'id' => $activeTrustVote->id,
-                    'ballotCount' => $trustVoteBallots->count(),
-                ] : null,
-                'promotionPending' => $promotionPendingTrustVote ? [
-                    'winnerName' => $promotionPendingTrustVote->winner?->display_name,
-                ] : null,
-            ];
-        }
+                    ]);
 
-        if ($isHoldingBoardMember && $hasSubsidiaryCapacity) {
-            $subsidiaryInviteTargets = Corporation::query()
-                ->select('id', 'name', 'home_city_id', 'ceo_id', 'is_holding_company', 'parent_trust_id')
-                ->with(['ceo:id,display_name'])
-                ->where('home_city_id', $corp->home_city_id)
-                ->where('is_holding_company', false)
-                ->whereNull('parent_trust_id')
-                ->whereNotNull('ceo_id')
-                ->orderBy('name')
+                $activeTrustVote = CorporationTrustVote::pending()
+                    ->with('ballots:id,trust_vote_id,voter_id,candidate_id')
+                    ->where('holding_company_id', $corp->id)
+                    ->first();
+
+                $promotionPendingTrustVote = CorporationTrustVote::promotionPending()
+                    ->with('winner:id,display_name')
+                    ->where('holding_company_id', $corp->id)
+                    ->first();
+
+                $trustVoteBlocker = $corp->trustVoteReadinessBlocker($trustBoardMembers);
+                $trustVoteBallots = $activeTrustVote?->ballots ?? collect();
+                $trustVoteBallotsByVoter = $trustVoteBallots->keyBy('voter_id');
+                $trustVoteTallies = $trustVoteBallots
+                    ->groupBy('candidate_id')
+                    ->map(fn($ballots) => $ballots->count());
+                $trustCandidateIds = $trustCandidates
+                    ->pluck('id')
+                    ->map(fn($id) => (int) $id)
+                    ->all();
+
+                $trustVote = [
+                    'visible' => (bool) $corp->is_holding_company,
+                    'canStart' => !$activeTrustVote && !$promotionPendingTrustVote,
+                    'blocker' => $trustVoteBlocker,
+                    'boardCount' => $trustBoardMembers->count(),
+                    'requiredVotes' => CorporationTrustVote::requiredVotesFor($trustBoardMembers->count()),
+                    'boardMembers' => $trustBoardMembers->map(function (Character $member) use ($character, $trustCandidateIds, $trustVoteBallotsByVoter, $trustVoteTallies) {
+                        $ballot = $trustVoteBallotsByVoter->get($member->id);
+
+                        return [
+                            'id' => $member->id,
+                            'name' => $member->display_name,
+                            'avatarUrl' => $member->avatar_url,
+                            'position' => $member->corporation_position === Corporation::POSITION_DIRECTOR_OF_BOARD
+                                ? 'BOARD_DIRECTOR'
+                                : strtoupper($member->corporation_position ?? 'member'),
+                            'isMe' => (int) $member->id === (int) $character->id,
+                            'isCandidate' => in_array((int) $member->id, $trustCandidateIds, true),
+                            'votes' => (int) ($trustVoteTallies[$member->id] ?? 0),
+                            'hasVoted' => (bool) $ballot,
+                        ];
+                    })->values(),
+                    'candidates' => $trustCandidates->map(fn(array $candidate) => [
+                        ...$candidate,
+                        'votes' => (int) ($trustVoteTallies[$candidate['id']] ?? 0),
+                        'isMe' => (int) $candidate['id'] === (int) $character->id,
+                    ]),
+                    'active' => $activeTrustVote ? [
+                        'id' => $activeTrustVote->id,
+                        'ballotCount' => $trustVoteBallots->count(),
+                    ] : null,
+                    'promotionPending' => $promotionPendingTrustVote ? [
+                        'winnerName' => $promotionPendingTrustVote->winner?->display_name,
+                    ] : null,
+                ];
+            }
+
+            if ($isHoldingBoardMember && $hasSubsidiaryCapacity) {
+                $subsidiaryInviteTargets = Corporation::query()
+                    ->select('id', 'name', 'home_city_id', 'ceo_id', 'is_holding_company', 'parent_trust_id')
+                    ->with(['ceo:id,display_name'])
+                    ->where('home_city_id', $corp->home_city_id)
+                    ->where('is_holding_company', false)
+                    ->whereNull('parent_trust_id')
+                    ->whereNotNull('ceo_id')
+                    ->orderBy('name')
+                    ->get()
+                    ->filter(fn(Corporation $candidate) => !CorporationController::hasPendingSubsidiaryInviteForCorporation($candidate->id))
+                    ->values()
+                    ->map(fn(Corporation $candidate) => [
+                        'id' => $candidate->id,
+                        'name' => $candidate->name,
+                        'ceoName' => $candidate->ceo?->display_name ?? 'Vacant',
+                    ]);
+            }
+
+            $outgoingSubsidiaryInvites = CorporationSubsidiaryInvite::pending()
+                ->with(['targetCorporation:id,name', 'targetCeo:id,display_name'])
+                ->where('requester_id', $character->id)
+                ->where('holding_company_id', $corp->id)
+                ->orderByDesc('created_at')
                 ->get()
-                ->filter(fn(Corporation $candidate) => !CorporationController::hasPendingSubsidiaryInviteForCorporation($candidate->id))
-                ->values()
-                ->map(fn(Corporation $candidate) => [
-                    'id' => $candidate->id,
-                    'name' => $candidate->name,
-                    'ceoName' => $candidate->ceo?->display_name ?? 'Vacant',
-                ]);
-        }
-
-        $outgoingSubsidiaryInvites = CorporationSubsidiaryInvite::pending()
-            ->with(['targetCorporation:id,name', 'targetCeo:id,display_name'])
-            ->where('requester_id', $character->id)
-            ->where('holding_company_id', $corp->id)
-            ->orderByDesc('created_at')
-            ->get()
-            ->map(fn(CorporationSubsidiaryInvite $invite) => [
-                'id' => $invite->id,
-                'targetCorporationName' => $invite->targetCorporation?->name,
-                'targetCeoName' => $invite->targetCeo?->display_name,
-                'expiresAt' => $invite->expires_at?->toIso8601String(),
-            ]);
-
-
-        $subsidiaryInvites = [
-            'canInvite' => $isHoldingBoardMember && $hasSubsidiaryCapacity,
-            'targets' => $subsidiaryInviteTargets,
-            'incoming' => $incomingSubsidiaryInvites
                 ->map(fn(CorporationSubsidiaryInvite $invite) => [
                     'id' => $invite->id,
-                    'holdingName' => $invite->holdingCompany?->name,
-                    'requesterName' => $invite->requester?->display_name,
                     'targetCorporationName' => $invite->targetCorporation?->name,
+                    'targetCeoName' => $invite->targetCeo?->display_name,
                     'expiresAt' => $invite->expires_at?->toIso8601String(),
+                ]);
+
+
+            $subsidiaryInvites = [
+                'canInvite' => $isHoldingBoardMember && $hasSubsidiaryCapacity,
+                'targets' => $subsidiaryInviteTargets,
+                'incoming' => $incomingSubsidiaryInvites()
+                    ->map(fn(CorporationSubsidiaryInvite $invite) => [
+                        'id' => $invite->id,
+                        'holdingName' => $invite->holdingCompany?->name,
+                        'requesterName' => $invite->requester?->display_name,
+                        'targetCorporationName' => $invite->targetCorporation?->name,
+                        'expiresAt' => $invite->expires_at?->toIso8601String(),
+                    ])
+                    ->values(),
+                'outgoing' => $outgoingSubsidiaryInvites,
+            ];
+
+            return [
+                'subsidiaryInvites' => $subsidiaryInvites,
+                'boardActions' => [
+                    'isBoardMember' => $isHoldingBoardMember,
+                    'capacity' => $boardCapacity,
+                    'boardCount' => $boardCount,
+                    'availableSlots' => $availableBoardSlots,
+                    'canPromote' => $isHoldingBoardMember,
+                    'promotionTargets' => $boardPromotionTargets,
+                    'pendingPromotions' => $pendingBoardPromotions,
+                    'kickableSubsidiaries' => $kickableSubsidiaries,
+                    'subsidiaryInvites' => $subsidiaryInvites,
+                    'subsidiaryCount' => $corp->is_holding_company ? $corp->activeSubsidiaryCount() : 0,
+                    'trustVote' => $trustVote,
+                ],
+            ];
+        });
+
+        // ── properties (owned + purchasable templates + tax) ──
+        $properties = self::memoOnce(function () use ($corp) {
+            $corp->load(['properties' => fn($q) => $q->owned()->orderBy('type')->orderBy('tier')]);
+
+            $propertyTaxRate = CorporationController::propertyTaxRateFor($corp);
+            $medicineImages = GameItem::query()
+                ->whereIn('slug', array_keys(CorporationProperty::MEDICAL_PRODUCTS))
+                ->pluck('image_url', 'slug')
+                ->all();
+            $ownedProperties = $corp->properties
+                ->map(fn(CorporationProperty $property) => [
+                    'id' => $property->id,
+                    'type' => $property->type,
+                    'tier' => $property->tier,
+                    'name' => $property->name,
+                    'imageUrl' => $property->image_url,
+                    'price' => $property->price,
+                    'dailyUpkeep' => $property->dailyUpkeepCost(),
+                    'condition' => $property->condition,
+                    'operational' => $property->isOperational(),
+                    'data' => $property->publicData($medicineImages),
                 ])
-                ->values(),
-            'outgoing' => $outgoingSubsidiaryInvites,
-        ];
-
-        $boardActions = [
-            'isBoardMember' => $isHoldingBoardMember,
-            'capacity' => $boardCapacity,
-            'boardCount' => $boardCount,
-            'availableSlots' => $availableBoardSlots,
-            'canPromote' => $isHoldingBoardMember,
-            'promotionTargets' => $boardPromotionTargets,
-            'pendingPromotions' => $pendingBoardPromotions,
-            'kickableSubsidiaries' => $kickableSubsidiaries,
-            'subsidiaryInvites' => $subsidiaryInvites,
-            'subsidiaryCount' => $corp->is_holding_company ? $corp->activeSubsidiaryCount() : 0,
-            'trustVote' => $trustVote,
-        ];
-
-        $propertyTaxRate = CorporationController::propertyTaxRateFor($corp);
-        $medicineImages = GameItem::query()
-            ->whereIn('slug', array_keys(CorporationProperty::MEDICAL_PRODUCTS))
-            ->pluck('image_url', 'slug')
-            ->all();
-        $ownedProperties = $corp->properties
-            ->map(fn(CorporationProperty $property) => [
-                'id' => $property->id,
-                'type' => $property->type,
-                'tier' => $property->tier,
-                'name' => $property->name,
-                'imageUrl' => $property->image_url,
-                'price' => $property->price,
-                'dailyUpkeep' => $property->dailyUpkeepCost(),
-                'condition' => $property->condition,
-                'operational' => $property->isOperational(),
-                'data' => $property->publicData($medicineImages),
-            ])
-            ->values();
-
-        $availablePurchaseIds = $corp->is_holding_company
-            ? collect()
-            : CorporationProperty::purchasableTemplatesFor($corp)->pluck('id')->map(fn($id) => (int) $id);
-
-        $propertyTemplates = $corp->is_holding_company
-            ? collect()
-            : CorporationProperty::query()
-                ->templates()
-                ->orderByRaw("CASE WHEN type = 'hq' THEN 0 ELSE 1 END")
-                ->orderBy('tier')
-                ->orderBy('name')
-                ->get()
-                ->reject(function (CorporationProperty $template) use ($corp) {
-                    return $corp->properties->contains(
-                        fn(CorporationProperty $property) => $property->type === $template->type
-                        && (int) $property->tier === (int) $template->tier
-                    );
-                })
-                ->values()
-                ->map(function (CorporationProperty $template) use ($availablePurchaseIds, $propertyTaxRate) {
-                    $quote = CorporationProperty::quoteFor($template, $propertyTaxRate);
-
-                    return [
-                        'id' => $template->id,
-                        'type' => $template->type,
-                        'tier' => $template->tier,
-                        'name' => $template->name,
-                        'imageUrl' => $template->image_url,
-                        'condition' => $template->condition,
-                        'price' => $quote['price'],
-                        'dailyUpkeep' => $template->dailyUpkeepCost(),
-                        'taxRate' => $quote['taxRate'],
-                        'tax' => $quote['tax'],
-                        'total' => $quote['total'],
-                        'data' => $template->data ?? [],
-                        'canPurchaseNow' => $availablePurchaseIds->contains((int) $template->id),
-                    ];
-                })
                 ->values();
 
-        $holdingContext = null;
-        if ($corp->parentTrust && !$corp->is_holding_company) {
+            $availablePurchaseIds = $corp->is_holding_company
+                ? collect()
+                : CorporationProperty::purchasableTemplatesFor($corp)->pluck('id')->map(fn($id) => (int) $id);
+
+            $propertyTemplates = $corp->is_holding_company
+                ? collect()
+                : CorporationProperty::query()
+                    ->templates()
+                    ->orderByRaw("CASE WHEN type = 'hq' THEN 0 ELSE 1 END")
+                    ->orderBy('tier')
+                    ->orderBy('name')
+                    ->get()
+                    ->reject(function (CorporationProperty $template) use ($corp) {
+                        return $corp->properties->contains(
+                            fn(CorporationProperty $property) => $property->type === $template->type
+                            && (int) $property->tier === (int) $template->tier
+                        );
+                    })
+                    ->values()
+                    ->map(function (CorporationProperty $template) use ($availablePurchaseIds, $propertyTaxRate) {
+                        $quote = CorporationProperty::quoteFor($template, $propertyTaxRate);
+
+                        return [
+                            'id' => $template->id,
+                            'type' => $template->type,
+                            'tier' => $template->tier,
+                            'name' => $template->name,
+                            'imageUrl' => $template->image_url,
+                            'condition' => $template->condition,
+                            'price' => $quote['price'],
+                            'dailyUpkeep' => $template->dailyUpkeepCost(),
+                            'taxRate' => $quote['taxRate'],
+                            'tax' => $quote['tax'],
+                            'total' => $quote['total'],
+                            'data' => $template->data ?? [],
+                            'canPurchaseNow' => $availablePurchaseIds->contains((int) $template->id),
+                        ];
+                    })
+                    ->values();
+
+            return ['owned' => $ownedProperties, 'templates' => $propertyTemplates, 'taxRate' => $propertyTaxRate];
+        });
+
+        // ── holding context (parent trust board + sibling operating companies) ──
+        $holdingContext = self::memoOnce(function () use ($corp, $core) {
+            $mapMember = $core()['mapMember'];
+            $mapOperatingCompany = $core()['mapOperatingCompany'];
+
+            if (!$corp->parentTrust || $corp->is_holding_company) {
+                return null;
+            }
+
             $holding = $corp->parentTrust;
-            $holdingContext = [
+
+            return [
                 'holdingCompany' => [
                     'id' => $holding->id,
                     'name' => $holding->name,
@@ -1205,56 +1338,15 @@ class CareerController extends Controller
                 ],
                 'operatingCompanies' => $holding->activeSubsidiaries->map($mapOperatingCompany),
             ];
-        }
+        });
 
-        return Inertia::render('Careers/Corporate', [
-            'myId' => $character->id,
-            'boardroom' => $boardroom,
-            'isLocalEnvironment' => app()->isLocal(),
-            'corporation' => [
-                'id' => $corp->id,
-                'name' => $corp->name,
-                'imageUrl' => $corp->image_url,
-                'boardNotes' => $corp->board_notes,
-                'city' => $corp->city?->name ?? 'Unknown',
-                'isHoldingCompany' => (bool) $corp->is_holding_company,
-                'parentTrustId' => $corp->parent_trust_id,
-                'parentTrust' => $corp->parentTrust ? [
-                    'id' => $corp->parentTrust->id,
-                    'name' => $corp->parentTrust->name,
-                    'imageUrl' => $corp->parentTrust->image_url,
-                    'city' => $corp->parentTrust->city?->name ?? 'Unknown',
-                ] : null,
-                'holdingContext' => $holdingContext,
-                'cash_reserves' => $corp->is_holding_company
-                    ? (int) $corp->cash_reserves + (int) $corp->subsidiaries->sum('cash_reserves')
-                    : (int) $corp->cash_reserves,
-                'slush_fund' => $corp->is_holding_company
-                    ? (int) $corp->slush_fund + (int) $corp->subsidiaries->sum('slush_fund')
-                    : (int) $corp->slush_fund,
-                'total_profits' => $corp->total_profits,
-                'ceo' => ['id' => $corp->ceo_id, 'name' => $corp->ceo?->display_name ?? 'Vacant'],
-                'isCeo' => $corp->isCeo($character),
-                'isCfo' => $corp->roleFor($character) === Corporation::POSITION_CFO,
-                'isFounder' => $corp->isFounder($character),
-                'maxMembers' => $corp->max_member_slots,
-                'ceoCareerRank' => $corp->ceo?->career_rank ?? 0,
-                'properties' => $ownedProperties,
-                'purchasableProperties' => $propertyTemplates,
-                'propertyTemplates' => $propertyTemplates,
-                'propertyTaxRate' => $propertyTaxRate,
-                'members' => $corp->members->map(fn($m) => $mapMember($m, $corp)),
-                'subsidiaries' => $corp->is_holding_company
-                    ? $corp->subsidiaries->map($mapOperatingCompany)
-                    : [],
-                'merger' => $merger,
-                'subsidiaryInvites' => $subsidiaryInvites,
-                'boardActions' => $boardActions,
-                'pendingMoveRequest' => $corp->pendingMoveRequest(),
-                'moveFee' => Corporation::MOVE_HQ_FEE,
-                'isPhaseOneOperatingCompany' => CorporationController::isPhaseOneOperatingCompany($corp),
-            ],
-        ]);
+        return [
+            'core' => $core,
+            'merger' => $merger,
+            'board' => $board,
+            'properties' => $properties,
+            'holdingContext' => $holdingContext,
+        ];
     }
 
 

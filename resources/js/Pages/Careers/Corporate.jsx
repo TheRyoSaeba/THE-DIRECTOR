@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Head, Link, router } from '@inertiajs/react';
 import { route } from 'ziggy-js';
 import { motion } from 'framer-motion';
@@ -26,6 +26,67 @@ const TABS = [
     { id: 'voting', label: 'Voting' },
     { id: 'settings', label: 'Company Settings' },
 ];
+
+// ── Partial-reload prop lists for actions ──────────────────────────────
+// Each POST redirects back to this page; Inertia then re-requests only the
+// listed props (nested `corporation.<key>` paths are merged into the current
+// corporation object). 'auth' (cash, timers) and 'flash' (result toast) are
+// shared props the layout needs after every action. 'boardroom' costs no
+// queries and keeps the empty state correct if the corporation is gone.
+const SHARED_PROPS = ['boardroom', 'auth', 'flash'];
+// Header/overview/personnel/finance data (members, treasury, leadership).
+const CORP_SUMMARY_PROPS = [
+    'corporation.id',
+    'corporation.name',
+    'corporation.imageUrl',
+    'corporation.boardNotes',
+    'corporation.city',
+    'corporation.isHoldingCompany',
+    'corporation.parentTrustId',
+    'corporation.parentTrust',
+    'corporation.holdingContext',
+    'corporation.cash_reserves',
+    'corporation.slush_fund',
+    'corporation.total_profits',
+    'corporation.ceo',
+    'corporation.isCeo',
+    'corporation.isCfo',
+    'corporation.isFounder',
+    'corporation.maxMembers',
+    'corporation.ceoCareerRank',
+    'corporation.members',
+    'corporation.subsidiaries',
+    'corporation.pendingMoveRequest',
+    'corporation.moveFee',
+    'corporation.isPhaseOneOperatingCompany',
+];
+// Mergers, subsidiary invites, board seats/promotions and trust votes.
+const CORP_DEALS_PROPS = ['corporation.merger', 'corporation.subsidiaryInvites', 'corporation.boardActions'];
+// Owned properties (incl. medical / laundering data) and purchasable templates.
+const CORP_PROPERTY_PROPS = [
+    'corporation.properties',
+    'corporation.purchasableProperties',
+    'corporation.propertyTemplates',
+    'corporation.propertyTaxRate',
+];
+const RELOAD_SUMMARY = [...CORP_SUMMARY_PROPS, ...SHARED_PROPS];
+const RELOAD_MEMBERSHIP = [...CORP_SUMMARY_PROPS, ...CORP_DEALS_PROPS, ...SHARED_PROPS];
+const RELOAD_PROPERTIES = [...CORP_SUMMARY_PROPS, ...CORP_PROPERTY_PROPS, ...SHARED_PROPS];
+// Props the server leaves out of the first response; loaded when their tab opens.
+const TAB_LAZY_PROPS = {
+    properties: CORP_PROPERTY_PROPS,
+    danger: ['corporation.merger'],
+};
+
+function TabSkeleton({ rows = 3 }) {
+    return (
+        <div className="space-y-2" aria-busy="true">
+            {Array.from({ length: rows }).map((_, index) => (
+                <div key={index} className="h-10 animate-pulse rounded-xl border border-slate-700/40 bg-slate-950/70" />
+            ))}
+        </div>
+    );
+}
 
 const POSITION_BADGES = {
     BOARD_DIRECTOR: 'border-slate-300/40 bg-slate-300/10 text-slate-100',
@@ -257,6 +318,7 @@ function ConfirmDanger({ label, confirmText, routeName }) {
 
     const submit = () => {
         setProcessing(true);
+        // Full reload on purpose: dissolving/leaving removes the corporation from the page.
         router.post(route(routeName), {}, {
             preserveScroll: true,
             onFinish: () => {
@@ -293,6 +355,8 @@ function InviteForm() {
         if (!target.trim()) return;
         setProcessing(true);
         router.post(route('career.corporation.invite'), { target: target.trim() }, {
+            // Only sends a journal invite to the target; nothing else on this page changes.
+            only: ['corporation.members', 'corporation.maxMembers', ...SHARED_PROPS],
             preserveScroll: true,
             onFinish: () => {
                 setProcessing(false);
@@ -325,6 +389,7 @@ function KickForm({ members, label = 'Remove Member' }) {
         if (!memberId) return;
         setProcessing(true);
         router.post(route('career.corporation.kick'), { member_id: parseInt(memberId, 10) }, {
+            only: RELOAD_MEMBERSHIP,
             preserveScroll: true,
             onFinish: () => {
                 setProcessing(false);
@@ -391,6 +456,7 @@ function AssignForm({ members, managers = [], mode = 'ceo' }) {
             position,
             reports_to_id: reportsToRequired ? parseInt(reportsToId, 10) : null,
         }, {
+            only: RELOAD_MEMBERSHIP,
             preserveScroll: true,
             onFinish: () => {
                 setProcessing(false);
@@ -443,6 +509,7 @@ function DemoteRankForm({ members }) {
         if (!memberId) return;
         setProcessing(true);
         router.post(route('career.corporation.demote-rank'), { member_id: parseInt(memberId, 10) }, {
+            only: RELOAD_MEMBERSHIP,
             preserveScroll: true,
             onFinish: () => {
                 setProcessing(false);
@@ -478,6 +545,7 @@ function DepositForm() {
         if (!parsed || parsed <= 0) return;
         setProcessing(true);
         router.post(route(routeName), { amount: parsed }, {
+            only: RELOAD_SUMMARY,
             preserveScroll: true,
             onFinish: () => {
                 setProcessing(false);
@@ -527,6 +595,7 @@ function DistributeForm({ members, myId, isHoldingCompany = false }) {
             member_id: parseInt(memberId, 10),
             amount: parsed,
         }, {
+            only: RELOAD_SUMMARY,
             preserveScroll: true,
             onFinish: () => {
                 setProcessing(false);
@@ -584,6 +653,7 @@ function TransferLeadershipForm({ members }) {
         if (!memberId) return;
         setProcessing(true);
         router.post(route('career.corporation.transfer-ceo'), { member_id: parseInt(memberId, 10) }, {
+            only: RELOAD_MEMBERSHIP,
             preserveScroll: true,
             onFinish: () => {
                 setProcessing(false);
@@ -638,6 +708,7 @@ function BoardNotes({ notes, isCeo }) {
         router.post(route('career.corporation.board-notes'), {
             board_notes: draft.trim(),
         }, {
+            only: ['corporation.boardNotes', ...SHARED_PROPS],
             preserveScroll: true,
             onFinish: () => setProcessing(false),
         });
@@ -679,6 +750,8 @@ function BannerForm({ imageUrl, errors = {} }) {
         router.post(route('career.corporation.banner'), {
             image_url: draft.trim() || null,
         }, {
+            // The banner also appears on the org chart (holding/subsidiary cards).
+            only: ['corporation.imageUrl', 'corporation.parentTrust', 'corporation.holdingContext', 'corporation.subsidiaries', ...SHARED_PROPS],
             preserveScroll: true,
             onFinish: () => setProcessing(false),
         });
@@ -720,6 +793,7 @@ function MergerProposalForm({ merger, errors = {} }) {
             holding_name: holdingName.trim(),
             holding_image_url: holdingImageUrl.trim() || null,
         }, {
+            only: RELOAD_MEMBERSHIP,
             preserveScroll: true,
             onFinish: () => setProcessing(false),
         });
@@ -784,6 +858,7 @@ function IncomingMergerCard({ request, successors }) {
     const accept = () => {
         if (!successorId) return;
         setProcessing(true);
+        // Full reload on purpose: accepting turns this company into a holding company.
         router.post(route('career.corporation.merger.accept', request.id), {
             target_successor_id: parseInt(successorId, 10),
         }, {
@@ -795,6 +870,7 @@ function IncomingMergerCard({ request, successors }) {
     const decline = () => {
         setProcessing(true);
         router.post(route('career.corporation.merger.cancel', request.id), {}, {
+            only: RELOAD_MEMBERSHIP,
             preserveScroll: true,
             onFinish: () => setProcessing(false),
         });
@@ -831,6 +907,7 @@ function OutgoingMergerCard({ request }) {
     const cancel = () => {
         setProcessing(true);
         router.post(route('career.corporation.merger.cancel', request.id), {}, {
+            only: RELOAD_MEMBERSHIP,
             preserveScroll: true,
             onFinish: () => setProcessing(false),
         });
@@ -857,6 +934,7 @@ function IncomingSubsidiaryInviteCard({ request, successors }) {
     const accept = () => {
         if (!successorId) return;
         setProcessing(true);
+        // Full reload on purpose: accepting restructures the whole corporation.
         router.post(route('career.corporation.subsidiary-invites.accept', request.id), {
             successor_id: parseInt(successorId, 10),
         }, {
@@ -868,6 +946,7 @@ function IncomingSubsidiaryInviteCard({ request, successors }) {
     const decline = () => {
         setProcessing(true);
         router.post(route('career.corporation.subsidiary-invites.cancel', request.id), {}, {
+            only: RELOAD_MEMBERSHIP,
             preserveScroll: true,
             onFinish: () => setProcessing(false),
         });
@@ -909,6 +988,7 @@ function SubsidiaryInviteForm({ invites }) {
         router.post(route('career.corporation.subsidiary-invites.create'), {
             target_corporation_id: parseInt(targetCorporationId, 10),
         }, {
+            only: RELOAD_MEMBERSHIP,
             preserveScroll: true,
             onFinish: () => {
                 setProcessing(false);
@@ -942,6 +1022,7 @@ function OutgoingSubsidiaryInviteCard({ request }) {
     const cancel = () => {
         setProcessing(true);
         router.post(route('career.corporation.subsidiary-invites.cancel', request.id), {}, {
+            only: RELOAD_MEMBERSHIP,
             preserveScroll: true,
             onFinish: () => setProcessing(false),
         });
@@ -1012,6 +1093,7 @@ function BoardPromotionForm({ boardActions }) {
             subsidiary_id: parseInt(subsidiaryId, 10),
             successor_id: parseInt(successorId, 10),
         }, {
+            only: RELOAD_MEMBERSHIP,
             preserveScroll: true,
             onFinish: () => setProcessing(false),
         });
@@ -1050,6 +1132,7 @@ function KickSubsidiaryForm({ subsidiaries, activeCount = 0 }) {
     const submit = () => {
         if (!canSubmit) return;
         setProcessing(true);
+        // Full reload on purpose: removing a subsidiary restructures the holding company.
         router.post(route('career.corporation.subsidiaries.kick'), {
             subsidiary_id: parseInt(subsidiaryId, 10),
         }, {
@@ -1322,6 +1405,7 @@ function TrustVotePanel({ trustVote }) {
         router.post(route('career.corporation.trust-votes.vote'), {
             candidate_id: selectedMember.id,
         }, {
+            only: RELOAD_MEMBERSHIP,
             preserveScroll: true,
             onFinish: () => setProcessing(false),
         });
@@ -1530,6 +1614,7 @@ function MedicalPayoutRateForm({ property }) {
 
         setProcessing(true);
         router.post(route('career.corporation.profits.medical.payout-rate'), { rate: parsedRate }, {
+            only: RELOAD_PROPERTIES,
             preserveScroll: true,
             onFinish: () => setProcessing(false),
         });
@@ -1567,6 +1652,7 @@ function MedicalNpcSellButtons({ property }) {
 
         setProcessing(row.slug);
         router.post(route('career.corporation.profits.medical.sell-npc'), { product: row.slug }, {
+            only: RELOAD_PROPERTIES,
             preserveScroll: true,
             onFinish: () => setProcessing(null),
         });
@@ -1600,6 +1686,7 @@ function MirrorBankerPercentageForm({ property }) {
 
         setProcessing(true);
         router.post(route('career.corporation.profits.laundering.banker-percentage'), { percentage }, {
+            only: RELOAD_PROPERTIES,
             preserveScroll: true,
             onFinish: () => setProcessing(false),
         });
@@ -1641,6 +1728,7 @@ function OffshoreTrustTransferForm() {
         router.post(route('career.corporation.profits.laundering.offshore-transfer'), {
             amount: transferAmount,
         }, {
+            only: RELOAD_PROPERTIES,
             preserveScroll: true,
             onFinish: () => {
                 setProcessing(false);
@@ -1695,6 +1783,7 @@ function MirrorTransactionForm({ property }) {
             banker_name: bankerName.trim(),
             amount: mirrorAmount,
         }, {
+            only: RELOAD_PROPERTIES,
             preserveScroll: true,
             onFinish: () => {
                 setProcessing(false);
@@ -1711,6 +1800,7 @@ function MirrorTransactionForm({ property }) {
         router.post(route('career.corporation.profits.laundering.mirror.cancel'), {
             request_key: request.request_key,
         }, {
+            only: RELOAD_PROPERTIES,
             preserveScroll: true,
             onFinish: () => setCanceling(false),
         });
@@ -1723,6 +1813,7 @@ function MirrorTransactionForm({ property }) {
         router.post(route('career.corporation.profits.laundering.mirror.execute'), {
             request_key: request.request_key,
         }, {
+            only: RELOAD_PROPERTIES,
             preserveScroll: true,
             onFinish: () => setExecuting(false),
         });
@@ -1963,6 +2054,7 @@ function PropertyDetailsPanel({ item, corporation, index, count, onBuy, processi
 function PropertiesPanel({ corporation }) {
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [processing, setProcessing] = useState(false);
+    const propertiesLoaded = corporation.properties !== undefined;
     const ownedProperties = corporation.properties ?? [];
     const purchasableProperties = corporation.propertyTemplates ?? corporation.purchasableProperties ?? [];
     const items = [
@@ -1987,10 +2079,20 @@ function PropertiesPanel({ corporation }) {
 
         setProcessing(true);
         router.post(route('career.corporation.properties.purchase'), { property_id: activeItem.property.id }, {
+            only: RELOAD_PROPERTIES,
             preserveScroll: true,
             onFinish: () => setProcessing(false),
         });
     };
+
+    // Property data is loaded on demand when the Properties tab opens.
+    if (!propertiesLoaded) {
+        return (
+            <Panel title="Properties" accent="text-amber-400">
+                <TabSkeleton rows={4} />
+            </Panel>
+        );
+    }
 
     return (
         <div className="grid gap-3 nav:grid-cols-[1.2fr_0.8fr]">
@@ -2060,6 +2162,7 @@ function MoveCorporation({ corporation }) {
     const submitRequest = () => {
         setProcessing(true);
         router.post(route('career.corporation.move.request'), {}, {
+            only: RELOAD_SUMMARY,
             preserveScroll: true,
             onFinish: () => setProcessing(false),
         });
@@ -2068,6 +2171,7 @@ function MoveCorporation({ corporation }) {
     const submitCancel = () => {
         setProcessing(true);
         router.post(route('career.corporation.move.cancel'), {}, {
+            only: RELOAD_SUMMARY,
             preserveScroll: true,
             onFinish: () => setProcessing(false),
         });
@@ -2099,9 +2203,16 @@ function MoveCorporation({ corporation }) {
 }
 
 function CompanyActions({ corporation, merger, subsidiaryInvites, isCeo, errors = {} }) {
-    return corporation?.isHoldingCompany
-        ? <BoardActions boardActions={corporation.boardActions ?? {}} />
-        : <MergerActions merger={merger} subsidiaryInvites={subsidiaryInvites} isCeo={isCeo} errors={errors} />;
+    if (corporation?.isHoldingCompany) {
+        return <BoardActions boardActions={corporation.boardActions ?? {}} />;
+    }
+
+    // `merger` is loaded on demand when this tab opens.
+    if (merger === undefined) {
+        return <TabSkeleton rows={2} />;
+    }
+
+    return <MergerActions merger={merger} subsidiaryInvites={subsidiaryInvites} isCeo={isCeo} errors={errors} />;
 }
 
 function BoardroomEmptyState({ boardroom, errors = {} }) {
@@ -2282,12 +2393,26 @@ export default function Corporate({ corporation, boardroom, myId, errors = {}, i
     const [activeTab, setActiveTab] = useState('overview');
     const [orgPreview, setOrgPreview] = useState('phase1');
 
+    // Some tabs' data is not part of the first response; fetch it (partial
+    // reload) when such a tab is open and the data is missing.
+    // (Holding companies never show the merger panel, so skip fetching it.)
+    const lazyTabProps = (TAB_LAZY_PROPS[activeTab] ?? [])
+        .filter((path) => !(path === 'corporation.merger' && corporation?.isHoldingCompany));
+    const missingTabProps = corporation
+        ? lazyTabProps.filter((path) => corporation[path.split('.')[1]] === undefined)
+        : [];
+    const missingTabPropsKey = missingTabProps.join(',');
+    useEffect(() => {
+        if (!missingTabPropsKey) return;
+        router.reload({ only: missingTabPropsKey.split(',') });
+    }, [missingTabPropsKey]);
+
     if (!corporation) {
         return <BoardroomEmptyState boardroom={boardroom} errors={errors} />;
     }
 
     const members = corporation.members ?? [];
-    const merger = corporation.merger ?? {};
+    const merger = corporation.merger;
     const subsidiaryInvites = corporation.subsidiaryInvites ?? {};
     const isHoldingCompany = Boolean(corporation.isHoldingCompany);
     const boardActions = corporation.boardActions ?? {};

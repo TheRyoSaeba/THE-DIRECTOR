@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Head, router, Link } from '@inertiajs/react';
 // @ts-ignore
 import { route } from 'ziggy-js';
@@ -135,7 +135,8 @@ interface CityHallProps {
     forum_posts: ForumPost[];
     forum_settings: ForumSettings;
     relocation: CityRelocationInfo;
-    pending_applications: PaginatedApplications | null;
+    // Not in the first response; requested when the Relocation tab opens.
+    pending_applications?: PaginatedApplications | null;
     is_mayor: boolean;
     is_aide: boolean;
     is_resident: boolean;
@@ -144,6 +145,16 @@ interface CityHallProps {
     can_post_forum: boolean;
     owner: { name: string; avatar_url: string | null } | null;
 }
+
+// Partial-reload prop lists: each action redirects back here and Inertia
+// re-requests only these props. 'auth' (cash/timers in the layout) and 'flash'
+// (result toast) are shared props needed after every action.
+const SHARED_PROPS = ['auth', 'flash'];
+const RELOAD_BULLETIN = ['bulletin_posts', ...SHARED_PROPS];
+const RELOAD_FORUM = ['forum_posts', ...SHARED_PROPS];
+// Aide changes also change the author roles shown on bulletin + forum posts.
+const RELOAD_AIDES = ['aides', 'bulletin_posts', 'forum_posts', ...SHARED_PROPS];
+const RELOAD_APPLICATIONS = ['pending_applications', ...SHARED_PROPS];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -195,6 +206,7 @@ function BulletinPanel({
             route('city.cityhall.announce', { city: citySlug }),
             { body: body.trim() },
             {
+                only: RELOAD_BULLETIN,
                 preserveScroll: true,
                 onSuccess: () => { setComposing(false); setBody(''); },
                 onFinish: () => setBusy(false),
@@ -314,7 +326,7 @@ function BulletinPanel({
                                         </div>
                                         {canPost && (
                                             <button
-                                                onClick={() => router.delete(route('city.cityhall.announce.delete', { city: citySlug, id: a.id }), { preserveScroll: true })}
+                                                onClick={() => router.delete(route('city.cityhall.announce.delete', { city: citySlug, id: a.id }), { only: RELOAD_BULLETIN, preserveScroll: true })}
                                                 className="shrink-0 p-1.5 rounded-md text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
                                             >
                                                 <Trash size={13} weight="bold" />
@@ -522,6 +534,7 @@ function ThreadView({
             route('city.cityhall.forum.reply', { city: citySlug, post: post.id }),
             { body: replyText.trim() },
             {
+                only: RELOAD_FORUM,
                 preserveScroll: true,
                 onSuccess: () => { setReplyText(''); setPage(totalPages); },
                 onFinish: () => setBusy(false),
@@ -536,10 +549,10 @@ function ThreadView({
         document.getElementById('reply-composer')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     };
 
-    const togglePin = () => router.post(route('city.cityhall.forum.pin', { city: citySlug, post: post.id }), {}, { preserveScroll: true });
-    const toggleLock = () => router.post(route('city.cityhall.forum.lock', { city: citySlug, post: post.id }), {}, { preserveScroll: true });
+    const togglePin = () => router.post(route('city.cityhall.forum.pin', { city: citySlug, post: post.id }), {}, { only: RELOAD_FORUM, preserveScroll: true });
+    const toggleLock = () => router.post(route('city.cityhall.forum.lock', { city: citySlug, post: post.id }), {}, { only: RELOAD_FORUM, preserveScroll: true });
     const del = () => {
-        router.delete(route('city.cityhall.forum.delete', { city: citySlug, post: post.id }), { preserveScroll: true });
+        router.delete(route('city.cityhall.forum.delete', { city: citySlug, post: post.id }), { only: RELOAD_FORUM, preserveScroll: true });
         onBack();
     };
 
@@ -754,15 +767,15 @@ function ThreadRow({
 
     const togglePin = (e: React.MouseEvent) => {
         e.stopPropagation();
-        router.post(route('city.cityhall.forum.pin', { city: citySlug, post: post.id }), {}, { preserveScroll: true });
+        router.post(route('city.cityhall.forum.pin', { city: citySlug, post: post.id }), {}, { only: RELOAD_FORUM, preserveScroll: true });
     };
     const toggleLock = (e: React.MouseEvent) => {
         e.stopPropagation();
-        router.post(route('city.cityhall.forum.lock', { city: citySlug, post: post.id }), {}, { preserveScroll: true });
+        router.post(route('city.cityhall.forum.lock', { city: citySlug, post: post.id }), {}, { only: RELOAD_FORUM, preserveScroll: true });
     };
     const del = (e: React.MouseEvent) => {
         e.stopPropagation();
-        router.delete(route('city.cityhall.forum.delete', { city: citySlug, post: post.id }), { preserveScroll: true });
+        router.delete(route('city.cityhall.forum.delete', { city: citySlug, post: post.id }), { only: RELOAD_FORUM, preserveScroll: true });
     };
 
     return (
@@ -909,7 +922,7 @@ function ForumPanel({
         router.post(
             route('city.cityhall.forum.view', { city: citySlug, post: p.id }),
             {},
-            { preserveScroll: true, preserveState: true, only: ['forum_posts'] },
+            { preserveScroll: true, preserveState: true, only: RELOAD_FORUM },
         );
     };
 
@@ -920,6 +933,7 @@ function ForumPanel({
             route('city.cityhall.forum.store', { city: citySlug }),
             { title: title.trim(), body: body.trim() },
             {
+                only: RELOAD_FORUM,
                 preserveScroll: true,
                 onSuccess: () => { setComposing(false); setTitle(''); setBody(''); },
                 onFinish: () => setBusy(false),
@@ -1089,7 +1103,7 @@ function ForumPanel({
 
 function RelocationPanel({
     relocation, citySlug, cityName, pendingApplications, canModerate,
-}: { relocation: CityRelocationInfo; citySlug: string; cityName: string; pendingApplications: PaginatedApplications | null; canModerate: boolean }) {
+}: { relocation: CityRelocationInfo; citySlug: string; cityName: string; pendingApplications?: PaginatedApplications | null; canModerate: boolean }) {
     const [busy, setBusy] = useState(false);
     const [busyAction, setBusyAction] = useState<number | null>(null);
 
@@ -1102,7 +1116,7 @@ function RelocationPanel({
         router.post(
             route('city.cityhall.relocate.approve', { city: citySlug, character: id }),
             {},
-            { preserveScroll: true, onFinish: () => setBusyAction(null) }
+            { only: RELOAD_APPLICATIONS, preserveScroll: true, onFinish: () => setBusyAction(null) }
         );
     };
 
@@ -1112,7 +1126,7 @@ function RelocationPanel({
         router.post(
             route('city.cityhall.relocate.deny', { city: citySlug, character: id }),
             {},
-            { preserveScroll: true, onFinish: () => setBusyAction(null) }
+            { only: RELOAD_APPLICATIONS, preserveScroll: true, onFinish: () => setBusyAction(null) }
         );
     };
 
@@ -1122,7 +1136,11 @@ function RelocationPanel({
         router.post(
             route('city.cityhall.relocate', { city: citySlug }),
             {},
-            { preserveScroll: true, onFinish: () => setBusy(false) },
+            {
+                only: ['relocation', 'is_home_city', 'is_resident', 'can_post_forum', ...SHARED_PROPS],
+                preserveScroll: true,
+                onFinish: () => setBusy(false),
+            },
         );
     };
 
@@ -1248,7 +1266,14 @@ function RelocationPanel({
             {canModerate && (
                 <div className={!canModerate ? "mt-8 pt-6 border-t border-white/[0.05]" : ""}>
 
-                    {pendingApplications && pendingApplications.data.length > 0 ? (
+                    {pendingApplications === undefined ? (
+                        // Loaded on demand when this tab opens.
+                        <div className="space-y-3" aria-busy="true">
+                            {[0, 1, 2].map(i => (
+                                <div key={i} className="h-20 rounded-xl bg-slate-900/40 border border-slate-700/40 animate-pulse" />
+                            ))}
+                        </div>
+                    ) : pendingApplications && pendingApplications.data.length > 0 ? (
                         <>
                             <div className="space-y-3">
                                 {pendingApplications.data.map(app => {
@@ -1312,7 +1337,7 @@ function RelocationPanel({
                                         {pendingApplications?.links.map((link, i) => (
                                             <button
                                                 key={i}
-                                                onClick={() => link.url && router.get(link.url, {}, { preserveScroll: true, preserveState: true })}
+                                                onClick={() => link.url && router.get(link.url, {}, { preserveScroll: true, preserveState: true, only: ['pending_applications'] })}
                                                 disabled={!link.url || link.active}
                                                 className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${link.active
                                                     ? 'bg-amber-500/20 text-amber-400'
@@ -1474,7 +1499,7 @@ function AidesCard({ aides, isMayor, citySlug }: { aides: Aide[]; isMayor: boole
         router.post(
             route('city.cityhall.aide.appoint', { city: citySlug }),
             { character_name: name.trim() },
-            { preserveScroll: true, onFinish: () => { setBusy(false); setAppointing(false); setName(''); } },
+            { only: RELOAD_AIDES, preserveScroll: true, onFinish: () => { setBusy(false); setAppointing(false); setName(''); } },
         );
     };
 
@@ -1501,7 +1526,7 @@ function AidesCard({ aides, isMayor, citySlug }: { aides: Aide[]; isMayor: boole
                                     <span className="text-xs font-black text-white uppercase tracking-tight flex-1 truncate">{aide.name}</span>
                                     {isMayor && (
                                         <button
-                                            onClick={() => router.delete(route('city.cityhall.aide.revoke', { city: citySlug, aide: aide.id }), { preserveScroll: true })}
+                                            onClick={() => router.delete(route('city.cityhall.aide.revoke', { city: citySlug, aide: aide.id }), { only: RELOAD_AIDES, preserveScroll: true })}
                                             className="p-1.5 rounded-lg text-slate-700 hover:text-red-400 hover:bg-red-500/10 transition-all"
                                         >
                                             <X size={11} weight="bold" />
@@ -1572,6 +1597,7 @@ function OwnerSettingsModal({
             route('city.cityhall.settings', { city: citySlug }),
             { post_fee: fee },
             {
+                only: ['forum_settings', ...SHARED_PROPS],
                 preserveScroll: true,
                 onFinish: () => { setSaving(false); onClose(); },
             },
@@ -1725,6 +1751,15 @@ export default function CityHall(props: CityHallProps = MOCK_PROPS) {
 
     const canPostAnnouncements = is_mayor || is_aide;
     const canModerate = is_mayor || is_aide;
+
+    // Pending relocation applications are not part of the first response:
+    // fetch them when a moderator opens the Relocation tab.
+    const needsApplications = activeTab === 'relocation' && canModerate && pending_applications === undefined;
+    useEffect(() => {
+        if (needsApplications) {
+            router.reload({ only: ['pending_applications'] });
+        }
+    }, [needsApplications]);
 
     // When the forum thread is open, the main panel takes the full width (sidebar hidden).
     const threadOpen = activeTab === 'forum' && activeThread !== null;

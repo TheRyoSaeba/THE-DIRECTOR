@@ -32,36 +32,60 @@ class CityHallController extends Controller
     {
         [$character, $city] = $this->getContext($request, $city);
 
-       
+        // Page props are lazy closures: Inertia partial reloads (`only: [...]`)
+        // run only the queries of the props they request. Shared lookups are
+        // memoized so a full page load still runs each query once.
+        $once = static function (\Closure $builder): \Closure {
+            $resolved = false;
+            $value = null;
+
+            return function () use (&$resolved, &$value, $builder) {
+                if (!$resolved) {
+                    $value = $builder();
+                    $resolved = true;
+                }
+
+                return $value;
+            };
+        };
+
+        // Which page props this request will resolve (all of them unless it is
+        // a partial reload of this component). Used only to size the shared
+        // aide lookup for bulletin/forum author roles.
+        $partialOnly = $request->header('X-Inertia-Partial-Component') === 'City/CityHall'
+            ? array_values(array_filter(explode(',', (string) $request->header('X-Inertia-Partial-Data', ''))))
+            : [];
+        $wants = fn (string $prop) => $partialOnly === [] || in_array($prop, $partialOnly, true);
 
         $isMayor    = $city->mayor_id !== null && $city->mayor_id === $character->id;
         $isResident = $character->city_id === $city->id;
-        $activeTerm = MayorTerm::activeForCity($city->id);
-        $isAide     = $activeTerm && CityHallAide::where('mayor_term_id', $activeTerm->id)
+        $activeTerm = $once(fn () => MayorTerm::activeForCity($city->id));
+        $isAide     = $once(fn () => $activeTerm() && CityHallAide::where('mayor_term_id', $activeTerm()->id)
             ->where('character_id', $character->id)
-            ->exists();
+            ->exists());
 
-        
-        $mayorData = null;
-        if ($city->mayor_id && $city->mayor) {
-            $mayorData = [
+        $mayorData = function () use ($city, $activeTerm) {
+            if (!($city->mayor_id && $city->mayor)) {
+                return null;
+            }
+
+            return [
                 'id'                  => $city->mayor->id,
                 'name'                => $city->mayor->display_name,
                 'avatar_url'          => $city->mayor->avatar_url,
-                'term_period'         => $activeTerm?->period ?? 1,
-                'term_days_remaining' => $activeTerm
+                'term_period'         => $activeTerm()?->period ?? 1,
+                'term_days_remaining' => $activeTerm()
                     ? max(0, (int) ceil(
-                        ($activeTerm->started_at->getTimestamp()
+                        ($activeTerm()->started_at->getTimestamp()
                             + (MayorTerm::PERIODS_PER_TERM * MayorTerm::PERIOD_SECONDS)
                             - now()->getTimestamp()) / 86400
                     ))
                     : 0,
             ];
-        }
+        };
 
-       
-        $aides = $activeTerm
-            ? CityHallAide::where('mayor_term_id', $activeTerm->id)
+        $aides = fn () => $activeTerm()
+            ? CityHallAide::where('mayor_term_id', $activeTerm()->id)
                 ->with('character:id,custom_avatar_url,gender,home_city_id')
                 ->orderBy('created_at')
                 ->get()
@@ -81,14 +105,14 @@ class CityHallController extends Controller
                 ->all()
             : [];
 
-        $bulletinRows = CityHallPost::announcements()
+        $bulletinRows = $once(fn () => CityHallPost::announcements()
             ->where('city_id', $city->id)
             ->with('author:id,custom_avatar_url,gender,career_id,career_rank')
             ->orderByDesc('created_at')
             ->limit(self::MAX_ANNOUNCEMENTS)
-            ->get();
+            ->get());
 
-        $pastMayors = MayorTerm::where('city_id', $city->id)
+        $pastMayors = fn () => MayorTerm::where('city_id', $city->id)
             ->whereNotNull('ended_at')
             ->with('character:id,custom_avatar_url,gender')
             ->orderByDesc('ended_at')
@@ -103,9 +127,8 @@ class CityHallController extends Controller
             ->values()
             ->all();
 
-
         // Forum threads + their replies (single query each via eager-load).
-        $threads = CityHallPost::forumThreads()
+        $threads = $once(fn () => CityHallPost::forumThreads()
             ->where('city_id', $city->id)
             ->with([
                 // career_id + career_rank are needed for the avatar_url accessor
@@ -116,105 +139,124 @@ class CityHallController extends Controller
                     ->orderBy('created_at'),
             ])
             ->forumOrdered()
-            ->get();
+            ->get());
 
-        // Collect every distinct character id appearing on this page —
-        // bulletin authors + thread authors + reply authors — then do ONE
-        // aide-set lookup that covers everyone (instead of two separate
-        // queries: one for bulletin and one for forum).
-        $characterIds = collect();
-        foreach ($threads as $t) {
-            if ($t->character_id) $characterIds->push($t->character_id);
-            foreach ($t->replies as $r) {
-                if ($r->character_id) $characterIds->push($r->character_id);
+        // Every distinct forum author id (thread + reply authors).
+        $forumAuthorIds = $once(function () use ($threads) {
+            $characterIds = collect();
+            foreach ($threads() as $t) {
+                if ($t->character_id) $characterIds->push($t->character_id);
+                foreach ($t->replies as $r) {
+                    if ($r->character_id) $characterIds->push($r->character_id);
+                }
             }
-        }
-        $bulletinAuthorIds = $bulletinRows->pluck('character_id')->filter();
-        $allAuthorIds = $characterIds->merge($bulletinAuthorIds)->unique()->values();
 
-        // Per-character forum post counts — one grouped query covering all
-        // forum-author characters.
-        $forumAuthorIds = $characterIds->unique()->values();
-        $postCounts = $forumAuthorIds->isEmpty()
-            ? collect()
-            : DB::table('city_hall_posts')
-                ->select('character_id', DB::raw('count(*) as c'))
-                ->where('city_id', $city->id)
-                ->where('type', 'forum')
-                ->whereIn('character_id', $forumAuthorIds->all())
-                ->groupBy('character_id')
-                ->pluck('c', 'character_id');
+            return $characterIds;
+        });
 
-        // ONE aide-set lookup for the whole page (was previously two —
-        // one for bulletin authors, one for forum authors).
-        $aideIds = $activeTerm && $allAuthorIds->isNotEmpty()
-            ? CityHallAide::where('mayor_term_id', $activeTerm->id)
-                ->whereIn('character_id', $allAuthorIds->all())
-                ->pluck('character_id')
-                ->all()
-            : [];
-        $aideSet = array_flip($aideIds);
-        $currentMayorId = $city->mayor_id;
+        // ONE aide-set lookup covering every author this request renders
+        // (bulletin and/or forum authors, depending on the props requested).
+        $resolveRole = $once(function () use ($city, $activeTerm, $wants, $bulletinRows, $forumAuthorIds) {
+            $authorIds = collect();
+            if ($wants('forum_posts')) {
+                $authorIds = $authorIds->merge($forumAuthorIds());
+            }
+            if ($wants('bulletin_posts')) {
+                $authorIds = $authorIds->merge($bulletinRows()->pluck('character_id')->filter());
+            }
+            $allAuthorIds = $authorIds->unique()->values();
 
-        $resolveRole = function (?int $characterId) use ($currentMayorId, $aideSet): string {
-            if ($characterId === null) return 'resident';
-            if ($characterId === $currentMayorId) return 'mayor';
-            if (isset($aideSet[$characterId])) return 'aide';
-            return 'resident';
-        };
+            $aideIds = $activeTerm() && $allAuthorIds->isNotEmpty()
+                ? CityHallAide::where('mayor_term_id', $activeTerm()->id)
+                    ->whereIn('character_id', $allAuthorIds->all())
+                    ->pluck('character_id')
+                    ->all()
+                : [];
+            $aideSet = array_flip($aideIds);
+            $currentMayorId = $city->mayor_id;
+
+            return function (?int $characterId) use ($currentMayorId, $aideSet): string {
+                if ($characterId === null) return 'resident';
+                if ($characterId === $currentMayorId) return 'mayor';
+                if (isset($aideSet[$characterId])) return 'aide';
+                return 'resident';
+            };
+        });
 
         // Bulletin payload.
-        $bulletinPosts = $bulletinRows->map(function ($a) use ($resolveRole) {
-            $live = $resolveRole($a->character_id);
-            $role = $live === 'resident' ? ($a->author_role ?: 'aide') : $live;
-            return [
-                'id'            => $a->id,
-                'author'        => $a->author_name,
-                'author_role'   => $role,
-                'author_avatar' => $a->author?->avatar_url ?? null,
-                'author_rank'   => $a->author?->current_rank?->rank_name,
-                'body'          => $a->body,
-                'pinned_at'     => $a->created_at->toIso8601String(),
-            ];
-        })->values()->all();
+        $bulletinPosts = function () use ($bulletinRows, $resolveRole) {
+            $resolve = $resolveRole();
+
+            return $bulletinRows()->map(function ($a) use ($resolve) {
+                $live = $resolve($a->character_id);
+                $role = $live === 'resident' ? ($a->author_role ?: 'aide') : $live;
+                return [
+                    'id'            => $a->id,
+                    'author'        => $a->author_name,
+                    'author_role'   => $role,
+                    'author_avatar' => $a->author?->avatar_url ?? null,
+                    'author_rank'   => $a->author?->current_rank?->rank_name,
+                    'body'          => $a->body,
+                    'pinned_at'     => $a->created_at->toIso8601String(),
+                ];
+            })->values()->all();
+        };
 
         // Forum payload.
-        $posts = $threads->map(function ($p) use ($postCounts, $resolveRole) {
-            $lastReply = $p->replies->last();
-            return [
-                'id'                 => $p->id,
-                'character_id'       => $p->character_id,
-                'author'             => $p->author_name,
-                'author_role'        => $resolveRole($p->character_id),
-                'author_avatar'      => $p->author?->avatar_url ?? null,
-                'author_rank'        => $p->author?->current_rank?->rank_name,
-                'author_post_count'  => (int) ($postCounts[$p->character_id] ?? 0),
-                'title'              => $p->title,
-                'body'               => $p->body,
-                'reply_count'        => $p->reply_count,
-                'views'              => (int) $p->views,
-                'is_pinned'          => (bool) $p->is_pinned,
-                'is_locked'          => (bool) $p->is_locked,
-                'created_at'         => $p->created_at->toIso8601String(),
-                'last_reply_at'      => $lastReply?->created_at->toIso8601String() ?? $p->created_at->toIso8601String(),
-                'last_reply_author'  => $lastReply?->author_name ?? $p->author_name,
-                'last_reply_role'    => $resolveRole($lastReply?->character_id ?? $p->character_id),
-                'last_reply_rank'    => $lastReply?->author?->current_rank?->rank_name ?? $p->author?->current_rank?->rank_name,
-                'last_reply_avatar'  => $lastReply?->author?->avatar_url ?? $p->author?->avatar_url ?? null,
-                'replies'            => $p->replies->map(fn ($r) => [
-                    'id'                => $r->id,
-                    'character_id'      => $r->character_id,
-                    'author'            => $r->author_name,
-                    'author_role'       => $resolveRole($r->character_id),
-                    'author_avatar'     => $r->author?->avatar_url ?? null,
-                    'author_rank'       => $r->author?->current_rank?->rank_name,
-                    'author_post_count' => (int) ($postCounts[$r->character_id] ?? 0),
-                    'body'              => $r->body,
-                    'created_at'        => $r->created_at->toIso8601String(),
-                ])->values()->all(),
-            ];
-        })->values()->all();
+        $posts = function () use ($city, $threads, $forumAuthorIds, $resolveRole) {
+            // Per-character forum post counts — one grouped query covering all
+            // forum-author characters.
+            $forumAuthors = $forumAuthorIds()->unique()->values();
+            $postCounts = $forumAuthors->isEmpty()
+                ? collect()
+                : DB::table('city_hall_posts')
+                    ->select('character_id', DB::raw('count(*) as c'))
+                    ->where('city_id', $city->id)
+                    ->where('type', 'forum')
+                    ->whereIn('character_id', $forumAuthors->all())
+                    ->groupBy('character_id')
+                    ->pluck('c', 'character_id');
+            $resolve = $resolveRole();
 
+            return $threads()->map(function ($p) use ($postCounts, $resolve) {
+                $lastReply = $p->replies->last();
+                return [
+                    'id'                 => $p->id,
+                    'character_id'       => $p->character_id,
+                    'author'             => $p->author_name,
+                    'author_role'        => $resolve($p->character_id),
+                    'author_avatar'      => $p->author?->avatar_url ?? null,
+                    'author_rank'        => $p->author?->current_rank?->rank_name,
+                    'author_post_count'  => (int) ($postCounts[$p->character_id] ?? 0),
+                    'title'              => $p->title,
+                    'body'               => $p->body,
+                    'reply_count'        => $p->reply_count,
+                    'views'              => (int) $p->views,
+                    'is_pinned'          => (bool) $p->is_pinned,
+                    'is_locked'          => (bool) $p->is_locked,
+                    'created_at'         => $p->created_at->toIso8601String(),
+                    'last_reply_at'      => $lastReply?->created_at->toIso8601String() ?? $p->created_at->toIso8601String(),
+                    'last_reply_author'  => $lastReply?->author_name ?? $p->author_name,
+                    'last_reply_role'    => $resolve($lastReply?->character_id ?? $p->character_id),
+                    'last_reply_rank'    => $lastReply?->author?->current_rank?->rank_name ?? $p->author?->current_rank?->rank_name,
+                    'last_reply_avatar'  => $lastReply?->author?->avatar_url ?? $p->author?->avatar_url ?? null,
+                    'replies'            => $p->replies->map(fn ($r) => [
+                        'id'                => $r->id,
+                        'character_id'      => $r->character_id,
+                        'author'            => $r->author_name,
+                        'author_role'       => $resolve($r->character_id),
+                        'author_avatar'     => $r->author?->avatar_url ?? null,
+                        'author_rank'       => $r->author?->current_rank?->rank_name,
+                        'author_post_count' => (int) ($postCounts[$r->character_id] ?? 0),
+                        'body'              => $r->body,
+                        'created_at'        => $r->created_at->toIso8601String(),
+                    ])->values()->all(),
+                ];
+            })->values()->all();
+        };
+
+        // Relocation state stays eager: it can auto-apply a pending relocation
+        // (side effect) and costs no queries in the common case.
         $timers          = $character->timers;
         $lastRelocation  = (int) ($timers?->last_relocation_at ?? 0);
         $pendingCityId   = $timers?->pending_relocation_city_id ?? null;
@@ -245,9 +287,14 @@ class CityHallController extends Controller
 
         $pendingIsThisCity = $pendingCityId !== null && $pendingCityId === $city->id;
 
-        $pendingApplications = null;
-        if ($isMayor || $isAide) {
-            $pendingApplications = Character::whereHas('timers', fn ($q) => $q->where('pending_relocation_city_id', $city->id))
+        // Relocation tab (moderators only): not sent on first load — the page
+        // requests it when the Relocation tab is opened.
+        $pendingApplications = function () use ($city, $isMayor, $isAide) {
+            if (!($isMayor || $isAide())) {
+                return null;
+            }
+
+            return Character::whereHas('timers', fn ($q) => $q->where('pending_relocation_city_id', $city->id))
                 ->with(['timers', 'property', 'corporation', 'businesses', 'career'])
                 ->orderBy('display_name')
                 ->paginate(10)
@@ -265,7 +312,7 @@ class CityHallController extends Controller
                     ],
                     'convictions'   => \App\Models\CrimeRecord::convictionCount($c->id),
                 ]);
-        }
+        };
 
         $policies = $city->mayor_id ? [
             'income_tax_rate'        => $city->income_tax_rate,
@@ -276,48 +323,46 @@ class CityHallController extends Controller
         ] : null;
 
         // Eager-load `owner` so the $cityHall?->owner access in the render
-        // payload (~line 337) doesn't lazy-fire its own SELECT for what is
+        // payload doesn't lazy-fire its own SELECT for what is
         // usually the same character we already loaded as $city->mayor.
-        $cityHall        = Business::forCity($city, 'city-hall', ['owner']);
-        $postFee         = $this->resolveForumPostFee($cityHall);
-        $isCityHallOwner = $cityHall && $cityHall->owner_id === $character->id;
+        $cityHall = $once(fn () => Business::forCity($city, 'city-hall', ['owner']));
 
         return Inertia::render('City/CityHall', [
-            'city' => [
+            'city' => fn () => [
                 'name'      => $city->name,
                 'slug'      => $city->slug,
-                'image_url' => $cityHall?->image_url ?? $city->image_url,
+                'image_url' => $cityHall()?->image_url ?? $city->image_url,
             ],
             'mayor'               => $mayorData,
             'aides'               => $aides,
             'policies'            => $policies,
             'bulletin_posts'      => $bulletinPosts,
             'past_mayors'         => $pastMayors,
-            'current_user_avatar' => $character->avatar_url,
+            'current_user_avatar' => fn () => $character->avatar_url,
             'forum_posts'         => $posts,
-            'forum_settings'      => [
-                'post_fee' => $postFee,
+            'forum_settings'      => fn () => [
+                'post_fee' => $this->resolveForumPostFee($cityHall()),
                 'fee_min'  => self::POST_FEE_MIN,
                 'fee_max'  => self::POST_FEE_MAX,
             ],
-            'relocation'          => [
+            'relocation'          => fn () => [
                 'home_city'               => $character->homeCity?->name ?? 'Unknown',
                 'cooldown_days_remaining' => $cooldownDays,
                 'pending_application'     => $pendingIsThisCity,
             ],
-            'pending_applications' => $pendingApplications,
+            'pending_applications' => Inertia::optional($pendingApplications),
             'is_mayor'             => $isMayor,
             'is_aide'              => $isAide,
             'is_resident'          => $isResident,
             'is_home_city'         => $character->home_city_id === $city->id,
-            'is_city_hall_owner'   => $isCityHallOwner,
-            'can_post_forum'       => $isResident
+            'is_city_hall_owner'   => fn () => $cityHall() && $cityHall()->owner_id === $character->id,
+            'can_post_forum'       => fn () => $isResident
                 && $character->isAlive()
                 && ! $character->isJailed()
                 && ! $character->isHospitalized(),
-            'owner' => $cityHall?->owner ? [
-                'name'       => $cityHall->owner->display_name,
-                'avatar_url' => $cityHall->owner->avatar_url,
+            'owner' => fn () => $cityHall()?->owner ? [
+                'name'       => $cityHall()->owner->display_name,
+                'avatar_url' => $cityHall()->owner->avatar_url,
             ] : null,
         ]);
     }

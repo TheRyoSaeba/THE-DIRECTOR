@@ -13,6 +13,16 @@ import { formatUTC, parseSymbolicAmount } from '@/Layouts/GameLayoutComponents';
 import type { TickerState } from '@/utils/tickerEngine';
 import { useMarketFeed, TickerStrip, MiniChart, RegimeBadge } from '@/Components/Tickers';
 
+// Partial-reload prop lists: each action redirects back here and Inertia
+// re-requests only these props. 'auth' (cash/timers in the layout) and 'flash'
+// (result toast) are shared props needed after every action. Ticker data is not
+// reloaded (the market feed polls it).
+const SHARED_PROPS = ['auth', 'flash'];
+// Trades move the bank balance (also caps the laundering amount) and add a report row.
+const RELOAD_TRADE = ['bank', 'financial_reports', 'launder_constants', ...SHARED_PROPS];
+// Laundering changes offers, bank balance (overhead) and the laundering cap.
+const RELOAD_LAUNDER = ['launder_clients', 'launder_relationships', 'bank', 'launder_constants', ...SHARED_PROPS];
+
 
 interface BankData {
     name: string;
@@ -148,6 +158,7 @@ export function EquitiesTerminal({ bankBalance, hasBank, positionCapPercent, ini
             route('career.banking.trade'),
             { ticker: selectedSymbol, direction, amount: parsedAmount, market_time: marketTime || undefined },
             {
+                only: RELOAD_TRADE,
                 preserveScroll: true,
                 onFinish: () => { setSubmitting(false); setAmount(''); },
             },
@@ -402,6 +413,7 @@ function PositionCapControl({ initialCap }: { initialCap: number }) {
             route('career.banking.position-cap'),
             { position_cap_percent: parsedCap },
             {
+                only: ['bank', ...SHARED_PROPS],
                 preserveScroll: true,
                 onFinish: () => setSavingCap(false),
             },
@@ -450,6 +462,7 @@ function StaffPanel({ bankers, positionCapPercent }: { bankers: DismissableBanke
             route('career.banking.dismiss'),
             { character_id: id },
             {
+                only: ['dismissable_bankers', ...SHARED_PROPS],
                 preserveScroll: true,
                 onFinish: () => { setDismissing(null); setConfirm(null); },
             },
@@ -706,6 +719,7 @@ function LaunderPanel({
     const post = (routeName: string, routeParams: Record<string, unknown>, data: Record<string, unknown> = {}, onDone?: () => void) => {
         setSubmitting(true);
         router.post(route(routeName, routeParams), data as Parameters<typeof router.post>[1], {
+            only: RELOAD_LAUNDER,
             preserveScroll: true,
             onFinish: () => { setSubmitting(false); onDone?.(); },
         });
@@ -714,6 +728,7 @@ function LaunderPanel({
     const postExecute = (offerId: number, cutPct: number) => {
         setExecuting(offerId);
         router.post(route('career.banking.launder.execute', { offer: offerId }), { cut_pct: cutPct } as Parameters<typeof router.post>[1], {
+            only: RELOAD_LAUNDER,
             preserveScroll: true,
             onFinish: () => setExecuting(null),
         });
@@ -722,6 +737,7 @@ function LaunderPanel({
     const postSaveCut = (offerId: number, cutPct: number) => {
         setSavingCut(offerId);
         router.post(route('career.banking.launder.update-cut', { offer: offerId }), { cut_pct: cutPct } as Parameters<typeof router.post>[1], {
+            only: RELOAD_LAUNDER,
             preserveScroll: true,
             onFinish: () => setSavingCut(null),
         });
@@ -730,6 +746,7 @@ function LaunderPanel({
     const postCancel = (offerId: number) => {
         setCanceling(offerId);
         router.post(route('career.banking.launder.cancel', { offer: offerId }), {} as Parameters<typeof router.post>[1], {
+            only: RELOAD_LAUNDER,
             preserveScroll: true,
             onFinish: () => {
                 setCanceling(null);

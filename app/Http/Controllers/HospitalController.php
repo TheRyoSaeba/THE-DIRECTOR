@@ -92,23 +92,26 @@ class HospitalController extends CityController
 
         $now = now()->getTimestamp();
 
-
-        $wardRows = Character::where('city_id', $city->id)
+        // Ward + staff lists are lazy closures so Inertia partial reloads
+        // (`only: [...]`) that don't request them skip their queries.
+        $patients = fn () => Character::where('city_id', $city->id)
             ->alive()
             ->whereHas('timers', fn($q) => $q->where('hospital_until', '>', $now))
             ->select('id')
             ->limit(50)
-            ->get();
+            ->get()
+            ->map(fn(Character $p) => [
+                'id' => encrypt($p->id),
+                'name' => 'Patient #' . strtoupper(\Illuminate\Support\Str::random(5)),
+                'avatar_url' => null,
+            ])->values()->all();
 
-        $patients = $wardRows->map(fn(Character $p) => [
-            'id' => encrypt($p->id),
-            'name' => 'Patient #' . strtoupper(\Illuminate\Support\Str::random(5)),
-            'avatar_url' => null,
-        ])->values()->all();
 
+        $staff = function () use ($careerId, $city) {
+            if (!$careerId) {
+                return [];
+            }
 
-        $staff = [];
-        if ($careerId) {
             $ranks = CareerRank::getRanksForCareer($careerId)->keyBy('rank_level');
             $members = Character::where('career_id', $careerId)
                 ->where('home_city_id', $city->id)
@@ -119,13 +122,13 @@ class HospitalController extends CityController
                 ->limit(50)
                 ->get();
 
-            $staff = $members->map(fn(Character $m) => [
+            return $members->map(fn(Character $m) => [
                 'id' => $m->id,
                 'name' => $m->display_name,
                 'avatar_url' => $m->custom_avatar_url ?: ($ranks->get($m->career_rank)?->avatar_url ?? null),
                 'rank_name' => $ranks->get($m->career_rank)?->rank_name ?? 'Resident',
             ])->values()->all();
-        }
+        };
 
         $genderFee = $hospital ? (int) $hospital->getSetting('gender_reassignment_fee', 50_000) : 50_000;
         $surgeryFee = $hospital ? (int) $hospital->getSetting('surgery_fee', 10_000) : 10_000;
@@ -226,24 +229,28 @@ class HospitalController extends CityController
         $surgeonGenderCut = (int) floor($genderFee * 0.10);
 
 
+        // Ward + staff lists are lazy closures so Inertia partial reloads
+        // (`only: [...]`) that don't request them skip their queries.
         $now = now()->getTimestamp();
-        $wardRows = Character::where('city_id', $city->id)
+        $patients = fn () => Character::where('city_id', $city->id)
             ->alive()
             ->where('id', '!=', $character->id)
             ->whereHas('timers', fn($q) => $q->where('hospital_until', '>', $now))
             ->select('id', 'health', 'max_health')
             ->limit(50)
-            ->get();
+            ->get()
+            ->map(fn(Character $p) => [
+                'id' => encrypt($p->id),
+                'name' => 'Patient #' . strtoupper(\Illuminate\Support\Str::random(5)),
+                'avatar_url' => null,
+            ])->values()->all();
 
-        $patients = $wardRows->map(fn(Character $p) => [
-            'id' => encrypt($p->id),
-            'name' => 'Patient #' . strtoupper(\Illuminate\Support\Str::random(5)),
-            'avatar_url' => null,
-        ])->values()->all();
 
+        $staff = function () use ($careerId, $city, $rankMap, $character) {
+            if (!$careerId) {
+                return [];
+            }
 
-        $staff = [];
-        if ($careerId) {
             $members = Character::where('career_id', $careerId)
                 ->where('home_city_id', $city->id)
                 ->alive()
@@ -253,7 +260,7 @@ class HospitalController extends CityController
                 ->limit(50)
                 ->get();
 
-            $staff = $members->map(fn(Character $m) => [
+            return $members->map(fn(Character $m) => [
                 'id' => $m->id,
                 'name' => $m->display_name,
                 'avatar_url' => $m->custom_avatar_url ?: ($rankMap->get($m->career_rank)?->avatar_url ?? null),
@@ -261,7 +268,7 @@ class HospitalController extends CityController
                 'rank_level' => $m->career_rank,
                 'is_self' => $m->id === $character->id,
             ])->values()->all();
-        }
+        };
 
         $surgeryQueueRaw = $hospital ? (array) $hospital->getSetting('surgery_queue', []) : [];
         $genderQueueRaw = $hospital ? (array) $hospital->getSetting('gender_queue', []) : [];

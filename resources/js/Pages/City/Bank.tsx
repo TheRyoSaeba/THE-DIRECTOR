@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent } from "react";
-import { router, Head } from "@inertiajs/react";
+import { router, Head, usePage } from "@inertiajs/react";
 // @ts-ignore
 import { route } from "ziggy-js";
 import {
@@ -187,10 +187,22 @@ function TxPager({ page, total, totalPages, onChange }: {
 // Account tab — deposit / withdraw
 // ─────────────────────────────────────────────────────────────
 
+// Partial-reload props for money actions: each POST redirects back here and
+// Inertia re-requests only these. 'auth' (cash in the layout) and 'flash'
+// (result toast) are shared props; the transaction history is refreshed only
+// when it has already been loaded (it is fetched on demand by the History tab).
+function useMoneyActionReloadProps(): string[] {
+    const { props } = usePage<{ transactions?: unknown }>();
+    return props.transactions !== undefined
+        ? ["bankData", "transactions", "auth", "flash"]
+        : ["bankData", "auth", "flash"];
+}
+
 function AccountPanel({ bankData }: { bankData: BankData }) {
     const [mode, setMode] = useState<"deposit" | "withdraw">("deposit");
     const [amount, setAmount] = useState("");
     const [busy, setBusy] = useState(false);
+    const reloadProps = useMoneyActionReloadProps();
 
     const parsed = parseSymbolicAmount(amount);
     const available = mode === "deposit" ? bankData.cash_on_hand : bankData.balance;
@@ -202,7 +214,7 @@ function AccountPanel({ bankData }: { bankData: BankData }) {
         router.post(
             route(`city.bank.${mode}`, { city: bankData.city_slug }),
             { amount: parsed },
-            { preserveScroll: true, onSuccess: () => setAmount(""), onFinish: () => setBusy(false) }
+            { only: reloadProps, preserveScroll: true, onSuccess: () => setAmount(""), onFinish: () => setBusy(false) }
         );
     };
 
@@ -316,6 +328,7 @@ function AccountPanel({ bankData }: { bankData: BankData }) {
 // ─────────────────────────────────────────────────────────────
 
 function TransferPanel({ bankData }: { bankData: BankData }) {
+    const reloadProps = useMoneyActionReloadProps();
     const [recipient, setRecipient] = useState("");
     const [amount, setAmount] = useState("");
     const [note, setNote] = useState("");
@@ -334,6 +347,7 @@ function TransferPanel({ bankData }: { bankData: BankData }) {
             route("city.bank.transfer", { city: bankData.city_slug }),
             { amount: parsed, recipient: recipient.trim(), note: note.trim() },
             {
+                only: reloadProps,
                 preserveScroll: true,
                 onSuccess: () => { setAmount(""); setRecipient(""); setNote(""); },
                 onFinish: () => setProcessing(false),
@@ -498,6 +512,7 @@ function CdCountdown({ maturesAt }: { maturesAt: string }) {
 }
 
 function CertificatesPanel({ bankData }: { bankData: BankData }) {
+    const reloadProps = useMoneyActionReloadProps();
     const [amount, setAmount] = useState("");
     const [submitting, setSubmitting] = useState(false);
 
@@ -517,7 +532,7 @@ function CertificatesPanel({ bankData }: { bankData: BankData }) {
         router.post(
             route("city.bank.certificates.purchase", { city: bankData.city_slug }),
             { amount: parsed },
-            { preserveScroll: true, onSuccess: () => setAmount(""), onFinish: () => setSubmitting(false) }
+            { only: reloadProps, preserveScroll: true, onSuccess: () => setAmount(""), onFinish: () => setSubmitting(false) }
         );
     };
 
@@ -836,7 +851,7 @@ function OwnerModal({ bankData, onClose }: { bankData: BankData; onClose: () => 
         router.post(
             route("city.bank.settings", { city: bankData.city_slug }),
             { loan_interest: interest, wire_fee: wireFee },
-            { preserveScroll: true, onFinish: () => { setSaving(false); onClose(); } }
+            { only: ["bankData", "auth", "flash"], preserveScroll: true, onFinish: () => { setSaving(false); onClose(); } }
         );
     };
 

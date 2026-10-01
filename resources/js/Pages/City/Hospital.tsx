@@ -66,6 +66,12 @@ interface HospitalProps {
 
 const fmt$ = (n: number) => `$${Math.round(n).toLocaleString()}`;
 
+// Partial-reload props for queue actions: each POST redirects back here and
+// Inertia re-requests only these. 'auth' (cash in the layout) and 'flash'
+// (result toast) are shared props needed after every action.
+const SURGERY_QUEUE_PROPS = ['in_surgery_queue', 'applied_surgery_fee', 'queue_patients', 'auth', 'flash'];
+const GENDER_QUEUE_PROPS = ['in_gender_queue', 'applied_gender_fee', 'queue_patients', 'auth', 'flash'];
+
 type Section = 'ward' | 'surgery' | 'gender' | 'roster';
 
 const SECTIONS: { key: Section; label: string; icon: any }[] = [
@@ -148,7 +154,8 @@ function SurgeryPanel({ surgeryFee, appliedFee, citySlug, inQueue }: { surgeryFe
         router.post(
             route('city.hospital.apply-surgery', { city: citySlug }),
             {},
-            { preserveScroll: true, onFinish: () => setBusy(false) }
+            // Partial reload: queue state plus shared 'auth' (cash) and 'flash'.
+            { only: SURGERY_QUEUE_PROPS, preserveScroll: true, onFinish: () => setBusy(false) }
         );
     };
 
@@ -158,7 +165,7 @@ function SurgeryPanel({ surgeryFee, appliedFee, citySlug, inQueue }: { surgeryFe
         router.post(
             route('city.hospital.cancel-surgery', { city: citySlug }),
             {},
-            { preserveScroll: true, onFinish: () => setBusy(false) }
+            { only: SURGERY_QUEUE_PROPS, preserveScroll: true, onFinish: () => setBusy(false) }
         );
     };
 
@@ -270,7 +277,7 @@ function GenderPanel({ genderFee, appliedFee, citySlug, inQueue }: { genderFee: 
         router.post(
             route('city.hospital.apply-gender', { city: citySlug }),
             {},
-            { preserveScroll: true, onFinish: () => setBusy(false) }
+            { only: GENDER_QUEUE_PROPS, preserveScroll: true, onFinish: () => setBusy(false) }
         );
     };
 
@@ -280,7 +287,7 @@ function GenderPanel({ genderFee, appliedFee, citySlug, inQueue }: { genderFee: 
         router.post(
             route('city.hospital.cancel-gender', { city: citySlug }),
             {},
-            { preserveScroll: true, onFinish: () => setBusy(false) }
+            { only: GENDER_QUEUE_PROPS, preserveScroll: true, onFinish: () => setBusy(false) }
         );
     };
 
@@ -439,7 +446,7 @@ function OwnerSettingsModal({
         router.post(
             route('city.hospital.settings', { city: citySlug }),
             { gender_reassignment_fee: gender, surgery_fee: surgery },
-            { preserveScroll: true, onFinish: () => { setSaving(false); onClose(); } }
+            { only: ['hospital', 'gender_fee', 'surgery_fee', 'auth', 'flash'], preserveScroll: true, onFinish: () => { setSaving(false); onClose(); } }
         );
     };
 

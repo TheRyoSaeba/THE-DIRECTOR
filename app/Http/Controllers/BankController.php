@@ -52,48 +52,56 @@ class BankController extends CityController
         $isManager = $manager !== null && (int) ($manager['id'] ?? 0) === (int) $character->id;
         $marketTime = (int) now()->getTimestamp();
 
-        $financialReports   = null;
-        $dismissableBankers = [];
+        // Props below are lazy closures so Inertia partial reloads (`only: [...]`)
+        // skip the queries of props they don't request. The bank lookup, CD
+        // auto-settlement and cash refresh above stay eager (side effects).
+        $financialReports = fn () => $rankInt >= 2 && $character->homeCity
+            ? BankTransaction::tradeReport($character->homeCity->id)
+            : null;
 
-        if ($rankInt >= 2 && $character->homeCity) {
-            $financialReports = BankTransaction::tradeReport($character->homeCity->id);
+        $dismissableBankers = function () use ($rankInt, $character) {
+            if (!($rankInt >= 2 && $character->homeCity)) {
+                return [];
+            }
 
             $bankingCareerId = Career::findByCode('banking')?->id;
-            if ($bankingCareerId) {
-                $bankingRanks = \App\Models\CareerRank::getRanksForCareer($bankingCareerId)->keyBy('rank_level');
-
-                $dismissableBankers = Character::select(['id', 'display_name', 'custom_avatar_url', 'career_rank'])
-                    ->where('career_id', $bankingCareerId)
-                    ->where('home_city_id', $character->home_city_id)
-                    ->where('id', '!=', $character->id)
-                    ->where('career_rank', '<', 4)
-                    ->orderByDesc('career_rank')
-                    ->orderBy('display_name')
-                    ->get()
-                    ->map(function ($c) use ($bankingRanks) {
-                        $rankEntry = $bankingRanks->get((int) $c->career_rank);
-                        return [
-                            'id'         => $c->id,
-                            'name'       => $c->display_name,
-                            'avatar_url' => $c->custom_avatar_url ?? $rankEntry?->avatar_url ?? null,
-                            'rank_name'  => $rankEntry?->rank_name ?? 'Banker',
-                            'rank'       => (int) $c->career_rank,
-                        ];
-                    })
-                    ->values()
-                    ->all();
+            if (!$bankingCareerId) {
+                return [];
             }
-        }
+
+            $bankingRanks = \App\Models\CareerRank::getRanksForCareer($bankingCareerId)->keyBy('rank_level');
+
+            return Character::select(['id', 'display_name', 'custom_avatar_url', 'career_rank'])
+                ->where('career_id', $bankingCareerId)
+                ->where('home_city_id', $character->home_city_id)
+                ->where('id', '!=', $character->id)
+                ->where('career_rank', '<', 4)
+                ->orderByDesc('career_rank')
+                ->orderBy('display_name')
+                ->get()
+                ->map(function ($c) use ($bankingRanks) {
+                    $rankEntry = $bankingRanks->get((int) $c->career_rank);
+                    return [
+                        'id'         => $c->id,
+                        'name'       => $c->display_name,
+                        'avatar_url' => $c->custom_avatar_url ?? $rankEntry?->avatar_url ?? null,
+                        'rank_name'  => $rankEntry?->rank_name ?? 'Banker',
+                        'rank'       => (int) $c->career_rank,
+                    ];
+                })
+                ->values()
+                ->all();
+        };
 
         return Inertia::render('Careers/Banking', [
-            'bank' => $homeCityBank ? [
+            'bank' => fn () => $homeCityBank ? [
                 'name'        => $homeCityBank->name,
                 'image'       => $homeCityBank->image_url ?? $homeCityBank->image ?? null,
                 'description' => $homeCityBank->description,
                 'balance'     => $bankBalance,
                 'position_cap_percent' => $derivatives->positionCapPercent($homeCityBank),
             ] : null,
-            'owner' => $homeCityBank && $homeCityBank->owner ? [
+            'owner' => fn () => $homeCityBank && $homeCityBank->owner ? [
                 'name'       => $homeCityBank->owner->display_name,
                 'avatar_url' => $homeCityBank->owner->avatar_url,
             ] : null,
@@ -104,7 +112,7 @@ class BankController extends CityController
             'is_owner'            => $homeCityBank && $homeCityBank->owner_id === $character->id,
             'financial_reports'   => $financialReports,
             'dismissable_bankers' => $dismissableBankers,
-            'launder_clients' => \App\Models\LaunderOffer::forBanker($character->id)
+            'launder_clients' => fn () => \App\Models\LaunderOffer::forBanker($character->id)
                 ->active()
                 ->with(['client:id,display_name,custom_avatar_url,career_id,career_rank'])
                 ->latest()
@@ -121,7 +129,7 @@ class BankController extends CityController
                 ])
                 ->values()
                 ->all(),
-            'launder_relationships' => \App\Models\LaunderOffer::forClient($character->id)
+            'launder_relationships' => fn () => \App\Models\LaunderOffer::forClient($character->id)
                 ->active()
                 ->with(['banker:id,display_name,custom_avatar_url,career_id,career_rank,home_city_id'])
                 ->latest()
@@ -147,7 +155,7 @@ class BankController extends CityController
                 'amount_min' => 1000,
             ],
             'market_server_time' => $marketTime,
-            'ticker_snapshots' => $derivatives->publicSnapshots($marketTime),
+            'ticker_snapshots' => fn () => $derivatives->publicSnapshots($marketTime),
         ]);
     }
 
