@@ -1,0 +1,174 @@
+/*
+ * Org chart connectors (Components/orgchart.jsx).
+ *
+ * Every list item draws its own connector to its parent, so each parent owns
+ * exactly the lines to its reports (no shared bars between unrelated
+ * subtrees). Classes sit on the elements themselves (not descendant
+ * selectors) so an outline tree can be nested inside a chart item.
+ *   ul.oc-c / li.oc-c-i   top-down chart        (.oc-c-root = top list)
+ *   ul.oc-o / li.oc-o-i   indented outline rail (.oc-o-root = top list)
+ * `.is-chain` marks the current user's reporting chain (drawn in cyan).
+ */
+.oc-tree {
+    --oc-line: rgb(71 85 105 / 0.7);
+    --oc-chain: rgb(34 211 238 / 0.9);
+    --oc-gap: 1.5rem;
+}
+
+/* ── Top-down chart ─────────────────────────────────────────────────────── */
+.oc-c {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    padding-top: var(--oc-gap);
+}
+
+.oc-c-root {
+    padding-top: 0;
+}
+
+.oc-c-i {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: var(--oc-gap) 0.375rem 0;
+}
+
+.oc-c-root > .oc-c-i {
+    padding-top: 0;
+}
+
+/* Sibling bar: each item draws its own share of it. */
+.oc-c-i::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    border-top: 1px solid var(--oc-line);
+}
+
+.oc-c-i:first-child::before {
+    left: 50%;
+}
+
+.oc-c-i:last-child::before {
+    right: 50%;
+}
+
+.oc-c-i:only-child::before {
+    display: none;
+}
+
+/* Drop from the sibling bar into the node. */
+.oc-c-i::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    height: var(--oc-gap);
+    border-left: 1px solid var(--oc-line);
+}
+
+.oc-c-root > .oc-c-i::before,
+.oc-c-root > .oc-c-i::after {
+    display: none;
+}
+
+/* Stub from the parent node down to its own sibling bar. */
+.oc-c:not(.oc-c-root)::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    height: var(--oc-gap);
+    border-left: 1px solid var(--oc-line);
+}
+
+.oc-c.has-chain:not(.oc-c-root)::before,
+.oc-c-i.is-chain::after {
+    z-index: 1;
+    border-color: var(--oc-chain);
+}
+
+/* Highlighted part of the sibling bar (parent centre -> chain child), measured in JS. */
+.oc-c.has-chain:not(.oc-c-root)::after {
+    content: '';
+    position: absolute;
+    z-index: 1;
+    top: var(--oc-gap);
+    left: var(--oc-bar-l, 50%);
+    width: var(--oc-bar-w, 0);
+    border-top: 1px solid var(--oc-chain);
+}
+
+/* ── Indented outline ───────────────────────────────────────────────────── */
+.oc-o-i {
+    position: relative;
+}
+
+.oc-o:not(.oc-o-root) {
+    margin-left: var(--oc-indent, 1.5rem);
+    padding-left: 1rem;
+}
+
+.oc-o:not(.oc-o-root) > .oc-o-i {
+    padding-top: 0.5rem;
+}
+
+/* Elbow into the node. */
+.oc-o:not(.oc-o-root) > .oc-o-i::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -1rem;
+    width: 0.875rem;
+    height: calc(0.5rem + var(--oc-elbow, 1.5rem));
+    border-bottom: 1px solid var(--oc-line);
+    border-left: 1px solid var(--oc-line);
+    border-bottom-left-radius: 0.5rem;
+}
+
+/* Rail continuing down to the next sibling. */
+.oc-o:not(.oc-o-root) > .oc-o-i::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -1rem;
+    border-left: 1px solid var(--oc-line);
+}
+
+.oc-o:not(.oc-o-root) > .oc-o-i:last-child::after {
+    display: none;
+}
+
+.oc-o:not(.oc-o-root) > .oc-o-i.is-chain::before,
+.oc-o:not(.oc-o-root) > .oc-o-i.rail-chain::after {
+    z-index: 1;
+    border-color: var(--oc-chain);
+}
+
+/* ── Expand / collapse ──────────────────────────────────────────────────── */
+@keyframes oc-in {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+.oc-enter {
+    animation: oc-in 160ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .oc-enter {
+        animation: none;
+    }
+}

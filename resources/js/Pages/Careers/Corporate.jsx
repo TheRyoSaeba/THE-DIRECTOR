@@ -3,7 +3,7 @@ import { Head, Link, router } from '@inertiajs/react';
 import { route } from 'ziggy-js';
 import { motion } from 'framer-motion';
 import Picker from '@/Components/picker';
-import OrgChart from '@/Components/orgchart';
+import OrgChart, { CorpLogo } from '@/Components/orgchart';
 import GameLayout from '@/Layouts/GameLayout';
 import { formatCash } from '@/Layouts/GameLayoutComponents';
 import {
@@ -101,171 +101,162 @@ const POSITION_BADGES = {
     MEMBER: 'border-slate-600/50 bg-slate-800/45 text-slate-300',
 };
 
-const MOCK_CORP_NAMES = ['CORTANA', 'CUSTOMER', 'MAKIMURA', 'BROCK', 'SABLE', 'NOX', 'VOLT'];
-const MOCK_MERGER_NAMES = ['LYNX', 'MORA', 'CIPHER', 'RIFT', 'ASH', 'VALE', 'JUNO'];
-const MOCK_ACQUIRED_NAMES = ['ORBIT', 'MERCY', 'WIRE', 'TRACE', 'GRIM', 'RUNE', 'ECHO'];
+// ── Local-only org chart previews (Phase 1 / 2 / 3) ───────────────────────
+// Mirrors the real progression: a merger turns two same-city operating
+// companies into subsidiaries of a new holding company, each CEO takes a board
+// seat (Group President, rank 5) and hands their company to a subordinate.
+// Board capacity is min(subsidiaries, 4) + 1; companies hold at most 7 members
+// (HQ tier 3). Phase 3 adds the Director of the Board (rank 7, trust vote)
+// once the board is 3+ Chairmen over 2+ subsidiaries. Fabricated people carry
+// `isPreview` so the chart does not link them to profiles.
+const PREVIEW_RANK_NAMES = {
+    CEO: 'Managing Director',
+    CFO: 'Department Head',
+    CTO: 'Department Head',
+    VP: 'Department Head',
+    MEMBER: 'Staff',
+    GROUP_PRESIDENT: 'Group President',
+    CHAIRMAN: 'Chairman',
+    BOARD_DIRECTOR: 'Director of the Board',
+};
 
-function findMockMember(pool, position, usedIds) {
-    return pool.find((member) => member.position === position && !usedIds.has(member.id));
-}
-
-function buildMockPerson(pool, usedIds, position, fallbackName, fallbackId, overrides = {}) {
-    const liveMember = findMockMember(pool, position, usedIds);
-
-    if (liveMember) {
-        usedIds.add(liveMember.id);
-
-        return {
-            ...liveMember,
-            position,
-            reportsToId: null,
-            ...overrides,
-        };
-    }
-
+function previewPerson(id, name, position, reportsToId = null, extra = {}) {
     return {
-        id: fallbackId,
-        name: fallbackName,
+        id,
+        name,
         position,
-        reportsToId: null,
-        ...overrides,
+        reportsToId,
+        rank: PREVIEW_RANK_NAMES[position] ?? 'Staff',
+        isCeo: position === 'CEO',
+        isPreview: true,
+        ...extra,
     };
 }
 
-function buildMockSubsidiary({ id, name, city, members = [], names, imageUrl = null }) {
-    const usedIds = new Set();
-    const pool = [...members].sort((left, right) => {
-        const order = ['CEO', 'CFO', 'CTO', 'VP', 'MEMBER'];
-        const leftIndex = order.indexOf(left.position);
-        const rightIndex = order.indexOf(right.position);
-
-        return (leftIndex === -1 ? 99 : leftIndex) - (rightIndex === -1 ? 99 : rightIndex);
-    });
-
-    const ceo = buildMockPerson(pool, usedIds, 'CEO', names[0], id + 1, { isFounder: true });
-    const cfo = buildMockPerson(pool, usedIds, 'CFO', names[1], id + 2);
-    const cto = buildMockPerson(pool, usedIds, 'CTO', names[2], id + 3);
-    const financeVp = buildMockPerson(pool, usedIds, 'VP', names[3], id + 4);
-    const techVp = buildMockPerson(pool, usedIds, 'VP', names[4], id + 5);
-    const financeMember = buildMockPerson(pool, usedIds, 'MEMBER', names[5], id + 6);
-    const techMember = buildMockPerson(pool, usedIds, 'MEMBER', names[6], id + 7);
-
-    cfo.reportsToId = ceo.id;
-    cto.reportsToId = ceo.id;
-    financeVp.reportsToId = cfo.id;
-    techVp.reportsToId = cto.id;
-    financeMember.reportsToId = financeVp.id;
-    techMember.reportsToId = techVp.id;
+// rows: [key, name, position, reportsToKey?, extra?]
+function previewCompany({ id, name, city, rows }) {
+    const ids = Object.fromEntries(rows.map(([key], index) => [key, id + index + 1]));
 
     return {
         id,
         name,
         city,
-        imageUrl,
-        members: [ceo, cfo, cto, financeVp, techVp, financeMember, techMember],
+        imageUrl: null,
+        members: rows.map(([key, personName, position, parentKey = null, extra = {}]) => (
+            previewPerson(ids[key], personName, position, parentKey ? ids[parentKey] : null, extra)
+        )),
     };
 }
 
-function handOffSubsidiary(company, fallbackName, fallbackId) {
-    const formerCeo = company.members.find((member) => member.position === 'CEO') ?? company.members[0];
-    const candidates = company.members.filter((member) => member.id !== formerCeo?.id);
-    const successor = candidates.find((member) => ['VP', 'MEMBER'].includes(member.position)) ?? candidates[0] ?? {
-        id: fallbackId,
-        name: fallbackName,
-        position: 'CEO',
-    };
+// The viewer's real company after its CEO moves up to the board: the CFO (or
+// best-ranked member) becomes CEO; everyone keeps their real reporting line.
+function handOffLiveCompany(corporation, members) {
+    const formerCeo = members.find((member) => member.isCeo || member.position === 'CEO') ?? null;
+    const others = members.filter((member) => member !== formerCeo);
+    if (!formerCeo || others.length === 0) return null;
+
+    const successor = others.find((member) => member.position === 'CFO')
+        ?? others.find((member) => member.position === 'CTO')
+        ?? [...others].sort((left, right) => (right.careerRank ?? 0) - (left.careerRank ?? 0))[0];
 
     return {
         formerCeo,
-        subsidiary: {
-            ...company,
-            members: [
-                {
-                    ...successor,
-                    position: 'CEO',
-                    title: 'Subsidiary CEO',
-                    reportsToId: null,
-                    isFounder: false,
-                },
-                ...company.members
-                    .filter((member) => member.id !== formerCeo?.id && member.id !== successor.id)
-                    .map((member) => ({
-                        ...member,
-                        reportsToId: Number(member.reportsToId) === Number(formerCeo?.id) ? successor.id : member.reportsToId,
-                    })),
-            ],
+        company: {
+            id: corporation.id ?? 9100,
+            name: corporation.name,
+            city: corporation.city,
+            imageUrl: corporation.imageUrl,
+            members: others.map((member) => (member.id === successor.id
+                ? { ...member, position: 'CEO', isCeo: true, reportsToId: null, rank: PREVIEW_RANK_NAMES.CEO }
+                : {
+                    ...member,
+                    reportsToId: Number(member.reportsToId) === Number(formerCeo.id) ? null : member.reportsToId,
+                })),
         },
     };
 }
 
 function buildOrgPreview(corporation, members, phase = 'phase2') {
     const baseName = corporation.name ?? 'Corporation';
-    const baseCity = corporation.city ?? 'Home City';
-    const currentCompanyDraft = buildMockSubsidiary({
+    const city = corporation.city ?? 'Home City';
+    const holdingName = `${baseName.split(/\s+/)[0]} Holdings`;
+    const live = handOffLiveCompany(corporation, members);
+    const formerCeo = live?.formerCeo ?? previewPerson(9001, corporation.ceo?.name ?? 'Founder', 'CEO');
+    const yourCompany = live?.company ?? previewCompany({
         id: 9100,
         name: baseName,
-        city: baseCity,
-        members,
-        names: MOCK_CORP_NAMES,
-        imageUrl: corporation.imageUrl,
+        city,
+        rows: [
+            ['ceo', 'Brock', 'CEO'],
+            ['cto', 'Nox', 'CTO', 'ceo'],
+            ['vp', 'Volt', 'VP', 'cto'],
+            ['m1', 'Sable', 'MEMBER', 'vp', { rank: 'Senior Staff' }],
+        ],
     });
-    const mergerCompanyDraft = buildMockSubsidiary({
+    // Merger partner: HQ tier 2 (5 seats).
+    const partner = previewCompany({
         id: 9200,
-        name: `${baseCity} Partner`,
-        city: baseCity,
-        names: MOCK_MERGER_NAMES,
+        name: 'Sable Dynamics',
+        city,
+        rows: [
+            ['ceo', 'Mora', 'CEO'],
+            ['cfo', 'Cipher', 'CFO', 'ceo'],
+            ['vp', 'Rift', 'VP', 'cfo'],
+            ['m1', 'Juno', 'MEMBER', 'vp', { rank: 'Senior Staff' }],
+            ['m2', 'Vale', 'MEMBER', 'ceo'],
+        ],
     });
-    const acquiredCompany = buildMockSubsidiary({
-        id: 9400,
-        name: 'Freed Subsidiary',
-        city: 'Absorbed',
-        names: MOCK_ACQUIRED_NAMES,
+    // Invited later: HQ tier 1 (3 seats).
+    const invited = previewCompany({
+        id: 9300,
+        name: 'Orbit Logistics',
+        city,
+        rows: [
+            ['ceo', 'Mercy', 'CEO'],
+            ['cto', 'Wire', 'CTO', 'ceo'],
+            ['m1', 'Echo', 'MEMBER', 'cto'],
+        ],
     });
-    const currentCompany = handOffSubsidiary(currentCompanyDraft, MOCK_CORP_NAMES[3], 9198);
-    const mergerCompany = handOffSubsidiary(mergerCompanyDraft, MOCK_MERGER_NAMES[3], 9298);
-    const chair = {
-        ...currentCompany.formerCeo,
-        id: 9301,
-        position: 'GROUP_PRESIDENT',
-        title: 'Group President',
+    const asBoard = (person, position) => ({
+        ...person,
+        position,
+        isCeo: false,
         reportsToId: null,
-    };
-    const mergerDirector = {
-        ...mergerCompany.formerCeo,
-        id: 9302,
-        position: 'BOARD',
-        title: 'Board of Directors',
-        reportsToId: null,
-    };
-    const promotedDirector = {
-        id: 9303,
-        name: 'KORVAN',
-        position: 'GROUP_PRESIDENT',
-        title: 'Group President',
-        reportsToId: null,
-    };
-    const isPhaseThreePreview = phase === 'phase3';
+        rank: PREVIEW_RANK_NAMES[position],
+    });
+    const you = formerCeo;
+    const lynx = previewPerson(9401, 'Lynx', 'GROUP_PRESIDENT', null, { isFounder: true });
+    const korvan = previewPerson(9402, 'Korvan', 'GROUP_PRESIDENT', null, { isFounder: true });
+
+    if (phase === 'phase3') {
+        const companies = [yourCompany, partner, invited];
+
+        return {
+            trust: { name: `${holdingName} Trust` },
+            holdingCompany: {
+                name: holdingName,
+                city,
+                imageUrl: corporation.imageUrl,
+                director: asBoard(you, 'BOARD_DIRECTOR'),
+                boardMembers: [asBoard(lynx, 'CHAIRMAN'), asBoard(korvan, 'CHAIRMAN')],
+                boardCapacity: Math.min(companies.length, 4) + 1,
+            },
+            operatingCompanies: companies,
+        };
+    }
+
+    const companies = [yourCompany, partner];
 
     return {
-        trust: isPhaseThreePreview ? {
-            name: `${baseName} Trust`,
-            imageUrl: corporation.imageUrl,
-            BOARD_DIRECTOR: {
-                ...chair,
-                id: 9501,
-                position: 'BOARD_DIRECTOR',
-                title: 'Director of the Board',
-                reportsToId: null,
-            },
-        } : null,
+        trust: null,
         holdingCompany: {
-            name: `${baseName} Holdings`,
+            name: holdingName,
+            city,
             imageUrl: corporation.imageUrl,
-            boardMembers: isPhaseThreePreview ? [mergerDirector, promotedDirector] : [chair, mergerDirector],
+            boardMembers: [asBoard(you, 'GROUP_PRESIDENT'), lynx],
+            boardCapacity: Math.min(companies.length, 4) + 1,
         },
-        operatingCompanies: isPhaseThreePreview
-            ? [currentCompany.subsidiary, mergerCompany.subsidiary, acquiredCompany]
-            : [currentCompany.subsidiary, mergerCompany.subsidiary],
+        operatingCompanies: companies,
     };
 }
 
@@ -410,6 +401,53 @@ function KickForm({ members, label = 'Remove Member' }) {
             {members.length === 0 && <p className="text-xs text-slate-500"></p>}
             <ActionButton onClick={submit} disabled={processing || !memberId} variant="danger">
                 {processing ? 'Removing...' : label}
+            </ActionButton>
+        </div>
+    );
+}
+
+// Shortcuts shown in the org chart's member dialog. Same endpoints and reload
+// lists as the Personnel tab's Demote Rank / Remove Member forms; role changes
+// stay in the Personnel tab (they need the reports-to picker).
+function MemberQuickActions({ member, onOpenPersonnel, onDone }) {
+    const [confirmKick, setConfirmKick] = useState(false);
+    const [processing, setProcessing] = useState(null);
+    const canDemoteRank = (member.careerRank ?? 0) > 1;
+
+    const submit = (routeName, key) => {
+        setProcessing(key);
+        router.post(route(routeName), { member_id: parseInt(member.id, 10) }, {
+            only: RELOAD_MEMBERSHIP,
+            preserveScroll: true,
+            onSuccess: () => onDone(),
+            onFinish: () => {
+                setProcessing(null);
+                setConfirmKick(false);
+            },
+        });
+    };
+
+    return (
+        <div className="space-y-2">
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Manage</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+                <ActionButton
+                    variant="warning"
+                    disabled={!canDemoteRank || processing !== null}
+                    onClick={() => submit('career.corporation.demote-rank', 'demote')}
+                >
+                    {processing === 'demote' ? 'Demoting...' : 'Demote Rank'}
+                </ActionButton>
+                <ActionButton
+                    variant="danger"
+                    disabled={processing !== null}
+                    onClick={() => (confirmKick ? submit('career.corporation.kick', 'kick') : setConfirmKick(true))}
+                >
+                    {processing === 'kick' ? 'Removing...' : confirmKick ? 'Confirm Remove' : 'Remove Member'}
+                </ActionButton>
+            </div>
+            <ActionButton variant="secondary" onClick={onOpenPersonnel} disabled={processing !== null}>
+                Change Role in Personnel
             </ActionButton>
         </div>
     );
@@ -2442,12 +2480,41 @@ export default function Corporate({ corporation, boardroom, myId, errors = {}, i
         trust: null,
         holdingCompany: {
             name: corporation.name,
+            city: corporation.city,
             imageUrl: corporation.imageUrl,
             director,
             boardMembers: members.filter((member) => member.position !== 'BOARD_DIRECTOR'),
+            boardCapacity: boardActions.capacity,
+            boardCount: boardActions.boardCount,
         },
         operatingCompanies: corporation.subsidiaries ?? [],
-    } : corporation.holdingContext ?? null;
+    } : corporation.holdingContext ? {
+        ...corporation.holdingContext,
+        holdingCompany: {
+            ...corporation.holdingContext.holdingCompany,
+            city: corporation.holdingContext.holdingCompany?.city ?? parentTrust?.city,
+        },
+    } : null;
+    // Quick actions in the org chart's member dialog: the same people the
+    // Personnel tab lets this viewer manage (operating companies only).
+    const canManageMembers = !isHoldingCompany && (isCeo || isLineManager);
+    const manageableIds = new Set(canManageMembers ? manageableMembers.map((member) => Number(member.id)) : []);
+    const renderMemberActions = (person, { close }) => {
+        if (person.isPreview || Number(person.id) === Number(myId)) return null;
+        const member = members.find((candidate) => Number(candidate.id) === Number(person.id));
+        if (!member || !manageableIds.has(Number(member.id))) return null;
+
+        return (
+            <MemberQuickActions
+                member={member}
+                onOpenPersonnel={() => {
+                    close();
+                    setActiveTab('personnel');
+                }}
+                onDone={close}
+            />
+        );
+    };
     const showHoldingLayout = isHoldingPreview || isHoldingCompany || Boolean(corporation.holdingContext);
     const boardSeatLabel = `${boardActions.boardCount ?? members.length} / ${boardActions.capacity ?? 0}`;
     const memberSeatLabel = `${members.length} / ${corporation.maxMembers}`;
@@ -2476,6 +2543,7 @@ export default function Corporate({ corporation, boardroom, myId, errors = {}, i
                         <img
                             src={corporation.imageUrl || 'https://images.thedirector.app/Careers/boardroom.jpg'}
                             alt=""
+                            onError={(event) => { event.currentTarget.style.visibility = 'hidden'; }}
                             className="h-full w-full object-cover opacity-30 blur-sm scale-105"
                         />
                         <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/70 to-slate-900/45" />
@@ -2489,10 +2557,13 @@ export default function Corporate({ corporation, boardroom, myId, errors = {}, i
 
                         </div>
                         <div className="overflow-hidden rounded-2xl border border-white/12 bg-slate-950/45 p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-                            <img
-                                src={corporation.imageUrl || 'https://images.thedirector.app/Careers/boardroom.jpg'}
-                                alt={corporation.name}
-                                className="h-32 w-full rounded-xl object-cover object-center brightness-110 contrast-105 saturate-110 nav:h-40"
+                            <CorpLogo
+                                src={corporation.imageUrl}
+                                name={corporation.name}
+                                size={null}
+                                className="h-32 w-full nav:h-40"
+                                imgClassName="object-center brightness-110 contrast-105 saturate-110"
+                                textClassName="text-5xl nav:text-6xl"
                             />
                         </div>
                     </div>
@@ -2559,7 +2630,7 @@ export default function Corporate({ corporation, boardroom, myId, errors = {}, i
                                     trust={orgPreviewModel.trust}
                                     holdingCompany={orgPreviewModel.holdingCompany}
                                     operatingCompanies={orgPreviewModel.operatingCompanies}
-                                    currentUserId={null}
+                                    currentUserId={myId}
                                 />
                             ) : realHoldingModel ? (
                                 <OrgChart
@@ -2568,9 +2639,16 @@ export default function Corporate({ corporation, boardroom, myId, errors = {}, i
                                     holdingCompany={realHoldingModel.holdingCompany}
                                     operatingCompanies={realHoldingModel.operatingCompanies}
                                     currentUserId={myId}
+                                    renderMemberActions={renderMemberActions}
                                 />
                             ) : (
-                                <OrgChart members={members} currentUserId={myId} />
+                                <OrgChart
+                                    members={members}
+                                    currentUserId={myId}
+                                    companyName={corporation.name}
+                                    rootReportsTo={parentTrust?.name ?? null}
+                                    renderMemberActions={renderMemberActions}
+                                />
                             )}
                         </Panel>
 
